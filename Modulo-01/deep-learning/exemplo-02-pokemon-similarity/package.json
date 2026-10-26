@@ -6,10 +6,12 @@
   "scripts": {
     "ingest": "node src/ingest.js",
     "seed": "node src/seed-vectors.js",
-    "start": "node --watch src/server.js"
+    "start": "node --watch src/server.js",
+    "train": "node src/train.js"
   },
   "license": "ISC",
   "dependencies": {
+    "@tensorflow/tfjs-node": "4.22",
     "express": "^5.3.0",
     "pg": "^8.23.1"
   }

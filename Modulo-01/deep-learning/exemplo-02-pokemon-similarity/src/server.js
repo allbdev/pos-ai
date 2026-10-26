@@ -1,12 +1,14 @@
 // ====================================================================
 // 🌐 Server: API HTTP para buscar Pokémon parecidos
 // ====================================================================
-// Pré-requisitos: banco no ar (docker compose up -d) e vetores salvos (npm run seed).
+// Pré-requisitos: banco no ar (docker compose up -d), vetores salvos (npm run seed)
+// e, para o /predict-type, modelo treinado (npm run train).
 // Rodar: npm start
 // Testar: curl "http://localhost:3001/pokemon/pikachu/similar?k=5"
 
 import express from 'express'
 import { pool } from './db.js'
+import { loadClassifier, validateInput } from './classifier.js'
 
 // 3001 para não conflitar com o exemplo-01, que usa a 3000
 const PORT = process.env.PORT ?? 3001
@@ -15,7 +17,21 @@ const PORT = process.env.PORT ?? 3001
 const DEFAULT_K = 5
 const MAX_K = 50
 
+// Carrega o classificador antes de subir o servidor (top-level await).
+// Se ainda não existir modelo treinado, a API sobe mesmo assim:
+// a busca por similaridade funciona e só o /predict-type fica indisponível.
+let predictType = null
+try {
+    predictType = await loadClassifier()
+    console.log('🔮 Modelo de tipos carregado')
+} catch (error) {
+    console.warn(`⚠️  Modelo não encontrado (rode "npm run train"): ${error.message}`)
+}
+
 const app = express()
+
+// Lê corpos JSON das requisições (POST) e coloca em req.body
+app.use(express.json())
 
 /**
  * GET /pokemon/:name/similar?k=5
@@ -72,6 +88,25 @@ app.get('/pokemon/:name/similar', async (req, res) => {
         },
         similar: neighbors.rows
     })
+})
+
+/**
+ * POST /predict-type
+ * Corpo: { "stats": { "hp": 35, "attack": 55, ... }, "height": 4, "weight": 60 }
+ * Retorna os 3 tipos primários mais prováveis segundo a rede neural.
+ */
+app.post('/predict-type', (req, res) => {
+    // 503 = serviço indisponível: o problema é do servidor (sem modelo), não do cliente
+    if (!predictType) {
+        return res.status(503).json({ error: 'Modelo não treinado. Rode "npm run train".' })
+    }
+
+    const error = validateInput(req.body)
+    if (error) {
+        return res.status(400).json({ error })
+    }
+
+    res.json({ predictions: predictType(req.body) })
 })
 
 // Middleware de erro: qualquer erro inesperado (ex.: banco fora do ar)

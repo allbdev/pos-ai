@@ -1,6 +1,6 @@
 # Pokémon Similarity & Type Prediction
 
-> Status: **planned**. This README describes the goal and the structure before any code is written.
+> Status: **Parts 1 and 2 done** (similarity search + type classifier). Next: experiments.
 
 A follow-up to [`exemplo-01`](../exemplo-01-ecommerce-recomendations-template). It uses the same techniques (normalization, one-hot encoding, feature weights, a small neural network) on a new dataset, with the work moved from the browser to a **Node backend**. The vectors are stored in **Postgres + pgvector**.
 
@@ -134,12 +134,12 @@ exemplo-02-pokemon-similarity/
 
 ## Roadmap
 
-- [ ] `ingest.js`: fetch and cache Generation 1
-- [ ] `context.js` + `encode.js`: encoding, reusing the ideas from exemplo-01
-- [ ] `docker-compose.yml` + `db.js`: pgvector running
-- [ ] `seed-vectors.js` + `/similar` endpoint: **Part 1 done**
-- [ ] `train.js`: classifier + baseline comparison
-- [ ] `/predict-type` endpoint: **Part 2 done**
+- [x] `ingest.js`: fetch and cache Generation 1
+- [x] `context.js` + `encode.js`: encoding, reusing the ideas from exemplo-01
+- [x] `docker-compose.yml` + `db.js`: pgvector running
+- [x] `seed-vectors.js` + `/similar` endpoint: **Part 1 done**
+- [x] `train.js`: classifier + baseline comparison
+- [x] `/predict-type` endpoint: **Part 2 done**
 - [ ] Simple HTML page with sprites (optional)
 
 ## Experiments

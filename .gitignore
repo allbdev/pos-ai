@@ -15,6 +15,7 @@ npm-debug.log*
 # Large datasets and trained models (download them again instead of committing)
 Modulo-01/machine-learning/archive/
 *.h5
+Modulo-01/deep-learning/exemplo-02-pokemon-similarity/model/
 
 # Course material (uncomment if this repository will be public)
 # *.pdf
