@@ -22,22 +22,29 @@ export const pool = new pg.Pool({ connectionString: DATABASE_URL })
 export const toSql = vector => JSON.stringify(vector)
 
 /**
- * Cria a extensão e a tabela, se ainda não existirem.
+ * Apaga e recria a tabela (e ativa a extensão, se preciso).
  *
- * @param {number} dimensions tamanho do vetor (context.dimensions, 25 na Gen 1).
- *   Vem do contexto em vez de ser fixo: se os dados mudarem (ex.: todas as gerações),
- *   o tamanho muda junto.
+ * @param {number} dimensions tamanho do vetor (context.dimensions: 25 na Gen 1, 26 com todas).
+ *   Vem do contexto em vez de ser fixo: se os dados mudarem, o tamanho muda junto.
+ *
+ * Por que apagar em vez de "CREATE TABLE IF NOT EXISTS"?
+ * O IF NOT EXISTS não altera uma tabela que já existe. Quando passamos da Gen 1
+ * para todas as gerações, apareceu o tipo dark e o vetor foi de 25 para 26 números:
+ * a tabela antiga (vector(25)) recusaria os vetores novos.
+ * Como o seed recria todos os dados a partir do JSON, recriar a tabela é seguro.
  */
-export async function createTable(dimensions) {
+export async function recreateTable(dimensions) {
     // Ativa o pgvector neste banco (a imagem Docker tem a extensão,
     // mas cada banco precisa ativar).
     await pool.query('CREATE EXTENSION IF NOT EXISTS vector')
+
+    await pool.query('DROP TABLE IF EXISTS pokemon')
 
     // embedding vector(N): coluna que guarda um vetor de N números.
     // É nela que o pgvector faz a busca por distância (<-> e <=>).
     // types text[]: array de texto do Postgres, ex.: {fire,flying}
     await pool.query(`
-        CREATE TABLE IF NOT EXISTS pokemon (
+        CREATE TABLE pokemon (
             id        integer PRIMARY KEY,
             name      text NOT NULL UNIQUE,
             types     text[] NOT NULL,
@@ -45,7 +52,4 @@ export async function createTable(dimensions) {
             embedding vector(${dimensions}) NOT NULL
         )
     `)
-    // Atenção: IF NOT EXISTS não altera uma tabela que já existe.
-    // Se o tamanho do vetor mudar, é preciso apagar a tabela
-    // (DROP TABLE pokemon) ou zerar o banco (docker compose down -v).
 }

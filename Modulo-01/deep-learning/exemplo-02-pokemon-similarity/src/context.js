@@ -20,7 +20,22 @@ export const STAT_NAMES = [
     'speed'
 ]
 
-// Menor e maior valor de uma lista. Com 151 itens, o spread (...) é tranquilo.
+// Escala logarítmica para altura e peso.
+//
+// Problema: o peso vai de 0.1 kg a 999.9 kg, mas quase todos os Pokémon são leves.
+// Com min-max direto, 92% deles ficavam espremidos entre 0 e 0.2
+// (Pikachu 6 kg => 0.006, Charizard 90 kg => 0.090): para a rede, quase iguais.
+//
+// O log "comprime" os valores grandes: cada vez que o peso multiplica por 10,
+// o log só soma ~2.3. Assim 6 kg, 90 kg e 460 kg viram 0.40, 0.72 e 0.91,
+// espalhados pela faixa 0–1. O que passa a importar é a PROPORÇÃO
+// (2× mais pesado), não a diferença absoluta (+100 kg).
+//
+// log1p(x) = log(1 + x): igual ao log para valores grandes, mas não quebra
+// com 0 (log(0) = -Infinito, e o /predict-type aceita peso 0).
+export const logScale = value => Math.log1p(value)
+
+// Menor e maior valor de uma lista. Com ~1000 itens, o spread (...) é tranquilo.
 const minMax = values => ({
     min: Math.min(...values),
     max: Math.max(...values)
@@ -40,8 +55,10 @@ export function makeContext(pokemons) {
         ])
     )
 
-    const height = minMax(pokemons.map(p => p.height))
-    const weight = minMax(pokemons.map(p => p.weight))
+    // Min/max calculados JÁ na escala log: o encode.js aplica o mesmo
+    // logScale antes de normalizar, então as duas escalas batem.
+    const height = minMax(pokemons.map(p => logScale(p.height)))
+    const weight = minMax(pokemons.map(p => logScale(p.weight)))
 
     // Todos os tipos que aparecem nos dados (primários e secundários).
     // flatMap junta os arrays: [['fire', 'flying'], ['water']] => ['fire', 'flying', 'water']

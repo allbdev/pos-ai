@@ -2,9 +2,9 @@
 // 🔢 Encode: transforma um Pokémon em um vetor de números
 // ====================================================================
 // Mesma ideia do encodeProduct da aula (exemplo-01).
-// O vetor final tem esse formato (25 números com os dados da Gen 1):
+// O vetor final tem esse formato (26 números com todas as gerações):
 //
-// [ hp, attack, defense, sp-attack, sp-defense, speed, height, weight, ...17 tipos ]
+// [ hp, attack, defense, sp-attack, sp-defense, speed, height, weight, ...18 tipos ]
 //   \____________________ 0 a 1 _____________________/ \___ 8 números ___/
 //
 // Diferente da aula, aqui usamos arrays JS normais em vez de tensores (tf):
@@ -12,7 +12,7 @@
 //  - não precisamos nos preocupar em liberar memória (dispose);
 //  - na hora de treinar, é só converter com tf.tensor2d(arrays).
 
-import { STAT_NAMES } from './context.js'
+import { STAT_NAMES, logScale } from './context.js'
 
 // O que define "Pokémon parecidos"? Os pesos decidem.
 // Com tipos pesando mais, os vizinhos tendem a ter o mesmo tipo.
@@ -34,15 +34,17 @@ const normalize = (value, { min, max }) => (value - min) / ((max - min) || 1)
  * lá a rede recebe os stats e tenta adivinhar o tipo, então
  * os tipos não podem fazer parte da entrada.
  *
- * Ex. (Pikachu): [0.10, 0.39, 0.20, 0.25, 0.29, 0.56, 0.02, 0.01]
+ * Ex. (Pikachu): [0.13, 0.28, 0.16, 0.25, 0.14, 0.44, 0.20, 0.40]
  */
 export function encodeStats(pokemon, context) {
     const stats = STAT_NAMES.map(name =>
         normalize(pokemon.stats[name], context.stats[name])
     )
 
-    const height = normalize(pokemon.height, context.height)
-    const weight = normalize(pokemon.weight, context.weight)
+    // Altura e peso: log primeiro, depois min-max (o contexto guarda min/max em log).
+    // Os stats não precisam de log: vão de ~5 a ~255, sem valores extremos.
+    const height = normalize(logScale(pokemon.height), context.height)
+    const weight = normalize(logScale(pokemon.weight), context.weight)
 
     return [...stats, height, weight]
 }

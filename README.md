@@ -19,14 +19,14 @@ IA/
         ├── exemplo-01-ecommerce-recomendations-template/
         │                               # Browser app: product recommendations trained in a Web Worker
         └── exemplo-02-pokemon-similarity/
-                                        # (planned) Node + pgvector: Pokémon similarity search + type classifier
+                                        # Node + pgvector: Pokémon similarity search + type classifier
 ```
 
 ## Modules
 
 | Module | Topic | Status |
 |---|---|---|
-| [Modulo-01](./Modulo-01) | Machine learning and deep learning fundamentals: neural networks, normalization, one-hot encoding, training with TensorFlow.js | In progress |
+| [Modulo-01](./Modulo-01) | Machine learning and deep learning fundamentals: neural networks, normalization, one-hot encoding, training with TensorFlow.js, vector search with pgvector | In progress |
 
 ## Running the examples
 
@@ -41,6 +41,13 @@ npm start
 # E-commerce recommendations (browser)
 cd Modulo-01/deep-learning/exemplo-01-ecommerce-recomendations-template
 npm install
+npm start
+
+# Pokémon similarity + type classifier (Node + Docker)
+cd Modulo-01/deep-learning/exemplo-02-pokemon-similarity
+npm install
+docker compose up -d
+npm run ingest && npm run seed && npm run train
 npm start
 ```
 

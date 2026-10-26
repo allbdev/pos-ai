@@ -9,7 +9,7 @@
 import { readFile } from 'node:fs/promises'
 import { makeContext } from './context.js'
 import { encodePokemon } from './encode.js'
-import { pool, createTable, toSql } from './db.js'
+import { pool, recreateTable, toSql } from './db.js'
 
 const DATA_FILE = new URL('../data/pokemon.json', import.meta.url)
 
@@ -20,7 +20,8 @@ async function main() {
     // antes de codificar qualquer um deles.
     const context = makeContext(pokemons)
 
-    await createTable(context.dimensions)
+    // Tabela nova e vazia a cada seed, já com o tamanho de vetor certo
+    await recreateTable(context.dimensions)
 
     // Pega UMA conexão do pool para usar em uma transação.
     // Transação = tudo ou nada: se um insert falhar no meio,
@@ -36,17 +37,11 @@ async function main() {
             // $1, $2... são parâmetros: o pg escapa os valores para nós.
             // Nunca monte SQL concatenando strings com dados (SQL injection).
             //
-            // ON CONFLICT (id) DO UPDATE = "upsert":
-            // se o Pokémon já existe, atualiza em vez de dar erro.
-            // EXCLUDED é a linha que tentamos inserir.
+            // INSERT simples: a tabela acabou de ser recriada vazia,
+            // então não existe Pokémon repetido para atualizar.
             await client.query(
                 `INSERT INTO pokemon (id, name, types, sprite, embedding)
-                 VALUES ($1, $2, $3, $4, $5)
-                 ON CONFLICT (id) DO UPDATE SET
-                     name      = EXCLUDED.name,
-                     types     = EXCLUDED.types,
-                     sprite    = EXCLUDED.sprite,
-                     embedding = EXCLUDED.embedding`,
+                 VALUES ($1, $2, $3, $4, $5)`,
                 [pokemon.id, pokemon.name, pokemon.types, pokemon.sprite, toSql(embedding)]
             )
         }

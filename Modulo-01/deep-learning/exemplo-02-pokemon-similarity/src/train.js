@@ -20,13 +20,40 @@ const MODEL_DIR = new URL('../model/', import.meta.url)
 // aprendeu de verdade ou só decorou (overfitting).
 const VALIDATION_SPLIT = 0.2
 
+// Hiperparâmetros: configurações que NÓS escolhemos (a rede não aprende).
+// Ficam aqui em cima para facilitar os experimentos.
+const MAX_EPOCHS = 100
+
+// Fração de neurônios desligados a cada passo do treino (0 = sem dropout)
+// Early stopping: para o treino se o val_loss não melhorar por N épocas seguidas
+//
+// Valores escolhidos medindo (média de 10 treinos, todas as gerações, ver README):
+// sem dropout e sem early stopping teve a MELHOR acurácia de validação (22.6%).
+// Com 1025 Pokémon a rede quase não decora (acc de treino ~33%), então
+// regularizar só atrapalha. Para testar de novo: DROPOUT_RATE = 0.3, PATIENCE = 10.
+const DROPOUT_RATE = 0
+
+// PATIENCE = MAX_EPOCHS na prática desliga o early stopping
+const PATIENCE = 100
+
+// Camadas escondidas: um número por camada = quantidade de neurônios.
+// [32, 16] = duas camadas, a primeira com 32 neurônios e a segunda com 16.
+// Mais neurônios/camadas = mais "capacidade" para aprender padrões,
+// mas também mais facilidade para decorar (overfitting).
+//
+// Testamos [64, 32], [128, 64] e [128, 64, 32] (ver README): a acurácia de treino
+// subiu (até 49%), mas a de validação ficou nos mesmos ~21%. Ou seja, a rede maior
+// só decorou mais. Ficamos com a menor: mesmo resultado, mais simples e rápida.
+const HIDDEN_LAYERS = [32, 16]
+
 /**
  * Embaralha uma cópia do array (algoritmo Fisher-Yates).
  *
  * Por que embaralhar ANTES de separar treino/validação?
  * O validationSplit do TensorFlow pega sempre os ÚLTIMOS 20% do array, sem embaralhar.
- * Nosso arquivo está em ordem de Pokédex, então a validação seria só os ids 122–151
- * (cheio de dragões e lendários) e a rede seria testada em tipos que quase não viu.
+ * Nosso arquivo está em ordem de Pokédex, então a validação seria só a última
+ * geração e meia (ids ~821–1025), e a rede seria testada em Pokémon de
+ * gerações que nunca viu no treino.
  */
 function shuffle(array) {
     const copy = [...array]
@@ -55,10 +82,22 @@ function baselineAccuracy(trainSet, validationSet) {
 function buildModel(numInputs, numClasses) {
     const model = tf.sequential()
 
-    // Rede bem menor que a da aula (128-64-32): temos só ~120 exemplos de treino.
-    // Rede grande + poucos dados = decora em vez de aprender.
-    model.add(tf.layers.dense({ inputShape: [numInputs], units: 32, activation: 'relu' }))
-    model.add(tf.layers.dense({ units: 16, activation: 'relu' }))
+    // Uma camada densa (+ dropout) para cada número em HIDDEN_LAYERS.
+    // Só a primeira camada precisa do inputShape (o tamanho da entrada);
+    // as seguintes descobrem o tamanho pela camada anterior.
+    HIDDEN_LAYERS.forEach((units, index) => {
+        model.add(tf.layers.dense({
+            ...(index === 0 && { inputShape: [numInputs] }),
+            units,
+            activation: 'relu'
+        }))
+
+        // Dropout: a cada passo do treino, "desliga" uma fração dos neurônios aleatoriamente.
+        // A rede não pode depender de um neurônio específico para lembrar de um Pokémon,
+        // então é forçada a aprender padrões mais gerais (combate o overfitting).
+        // Só age no treino: no predict(), todos os neurônios ficam ligados.
+        model.add(tf.layers.dropout({ rate: DROPOUT_RATE }))
+    })
 
     // Saída: 1 neurônio por tipo primário.
     // softmax transforma a saída em probabilidades que somam 1.
@@ -81,7 +120,7 @@ async function main() {
     const pokemons = JSON.parse(await readFile(DATA_FILE, 'utf8'))
     const context = makeContext(pokemons)
 
-    // Classes = tipos que aparecem como PRIMÁRIOS (15 na Gen 1).
+    // Classes = tipos que aparecem como PRIMÁRIOS (18 com todas as gerações; eram 15 só na Gen 1).
     // Ordem alfabética, como no context.js: a posição 0 da saída é sempre o mesmo tipo.
     const classes = [...new Set(pokemons.map(p => p.types[0]))].sort()
 
@@ -105,29 +144,47 @@ async function main() {
 
     console.log(`Treino: ${trainSet.length} Pokémon | Validação: ${validationSet.length} | Classes: ${classes.length}\n`)
 
+    // Formata uma linha de log: compare acc (treino) com val_acc (validação).
+    // Se acc sobe e val_acc não acompanha, a rede está decorando.
+    const formatEpoch = (label, epoch, logs) =>
+        `${label} ${String(epoch + 1).padStart(3)} | ` +
+        `loss ${logs.loss.toFixed(3)} acc ${logs.acc.toFixed(2)} | ` +
+        `val_loss ${logs.val_loss.toFixed(3)} val_acc ${logs.val_acc.toFixed(2)}`
+
+    let lastEpoch = { epoch: 0, logs: null }
+
     await model.fit(xs, ys, {
-        epochs: 100,
+        epochs: MAX_EPOCHS,
         batchSize: 16,
         validationSplit: VALIDATION_SPLIT,
         // shuffle aqui embaralha só os dados de treino a cada época
         shuffle: true,
         // verbose 0 = sem a barra de progresso padrão, usamos o nosso log
         verbose: 0,
-        callbacks: {
-            onEpochEnd: (epoch, logs) => {
-                // Loga a cada 10 épocas para não poluir o terminal.
-                // Compare acc (treino) com val_acc (validação):
-                // se acc sobe e val_acc não acompanha, a rede está decorando.
-                if ((epoch + 1) % 10 !== 0) return
+        callbacks: [
+            // Early stopping: quando o val_loss para de melhorar, a rede começou
+            // a decorar o treino. Esperamos PATIENCE épocas (o val_loss oscila)
+            // e, se não melhorar, paramos.
+            // Obs.: no TensorFlow.js não dá para voltar aos melhores pesos
+            // (restoreBestWeights não existe), então ficamos com os pesos
+            // de PATIENCE épocas depois do melhor ponto.
+            tf.callbacks.earlyStopping({ monitor: 'val_loss', patience: PATIENCE }),
 
-                console.log(
-                    `Época ${String(epoch + 1).padStart(3)} | ` +
-                    `loss ${logs.loss.toFixed(3)} acc ${logs.acc.toFixed(2)} | ` +
-                    `val_loss ${logs.val_loss.toFixed(3)} val_acc ${logs.val_acc.toFixed(2)}`
-                )
-            }
-        }
+            // Dentro de um array, o objeto { onEpochEnd } precisa ser embrulhado
+            // em tf.CustomCallback (sozinho, fora de array, o tf faz isso por nós).
+            new tf.CustomCallback({
+                onEpochEnd: (epoch, logs) => {
+                    lastEpoch = { epoch, logs }
+
+                    // Loga a cada 10 épocas para não poluir o terminal
+                    if ((epoch + 1) % 10 === 0) console.log(formatEpoch('Época', epoch, logs))
+                }
+            })
+        ]
     })
+
+    // Com early stopping, o treino pode parar numa época que não é múltipla de 10
+    console.log(formatEpoch('Parou na época', lastEpoch.epoch, lastEpoch.logs))
 
     // Avaliação final: rede vs. chute do tipo mais comum, na validação
     const validationXs = tf.tensor2d(validationSet.map(p => encodeStats(p, context)))

@@ -9,10 +9,33 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 
 const API_URL = 'https://pokeapi.co/api/v2/pokemon'
+const SPECIES_URL = 'https://pokeapi.co/api/v2/pokemon-species'
 
-// Geração 1: ids de 1 a 151. Dataset pequeno, como na aula.
+// Começamos com a Geração 1 (ids 1 a 151) e agora usamos TODAS as gerações.
+// O último id vem da API (getSpeciesCount) em vez de ficar fixo no código:
+// quando sair uma geração nova, é só rodar o ingest de novo.
 const FIRST_ID = 1
-const LAST_ID = 151
+
+/**
+ * Quantas espécies de Pokémon existem (1025 em 2026).
+ *
+ * Por que /pokemon-species e não /pokemon?
+ * O /pokemon também lista formas alternativas (Megas, formas regionais...)
+ * com ids a partir de 10001. Cada espécie tem uma forma padrão com o mesmo
+ * id da espécie, então os ids de 1 até o total de espécies são exatamente
+ * um Pokémon de cada, sem repetição.
+ */
+async function getSpeciesCount() {
+    // limit=1: só queremos o campo "count", não a lista
+    const response = await fetch(`${SPECIES_URL}?limit=1`)
+
+    if (!response.ok) {
+        throw new Error(`Falha ao buscar o total de espécies: HTTP ${response.status}`)
+    }
+
+    const { count } = await response.json()
+    return count
+}
 
 // Caminho relativo a ESTE arquivo (src/), não a pasta onde o comando foi rodado.
 // Assim o script funciona tanto com "npm run ingest" quanto com "node src/ingest.js".
@@ -71,10 +94,11 @@ function simplifyPokemon(raw) {
 }
 
 async function main() {
+    const LAST_ID = await getSpeciesCount()
     const pokemons = []
 
-    // Uma requisição por vez (sequencial), de propósito:
-    // são só 151 chamadas, e assim não sobrecarregamos uma API pública e gratuita.
+    // Uma requisição por vez (sequencial), de propósito: demora alguns minutos,
+    // mas não sobrecarregamos uma API pública e gratuita. E só rodamos isso uma vez.
     for (let id = FIRST_ID; id <= LAST_ID; id++) {
         const raw = await fetchPokemon(id)
         const pokemon = simplifyPokemon(raw)
