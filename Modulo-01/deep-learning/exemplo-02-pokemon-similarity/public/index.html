@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pokémon parecidos</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <main>
+        <header>
+            <h1>Pokémon parecidos</h1>
+            <p class="subtitle">
+                Busca por similaridade com pgvector: cada Pokémon é um vetor de stats, tamanho, tipos e golpes.
+            </p>
+        </header>
+
+        <!-- Formulário de busca. O submit é tratado no app.js (sem recarregar a página). -->
+        <form id="search-form" class="controls">
+            <label class="field field-name">
+                <span>Pokémon</span>
+                <!-- list="pokemon-names": autocompletar com o <datalist> abaixo -->
+                <input id="name-input" name="name" list="pokemon-names" placeholder="ex.: pikachu" autocomplete="off" required>
+            </label>
+
+            <label class="field">
+                <span>Distância</span>
+                <select id="metric-select" name="metric">
+                    <option value="euclidean">Euclidiana (tamanho)</option>
+                    <option value="cosine">Cosseno (formato)</option>
+                </select>
+            </label>
+
+            <label class="field">
+                <span>Quantos</span>
+                <select id="k-select" name="k">
+                    <option value="5">5</option>
+                    <option value="10" selected>10</option>
+                    <option value="20">20</option>
+                </select>
+            </label>
+
+            <button type="submit">Buscar</button>
+        </form>
+
+        <!-- Preenchido pelo app.js com os nomes vindos do GET /pokemon -->
+        <datalist id="pokemon-names"></datalist>
+
+        <!-- Mensagens de carregando / erro -->
+        <p id="status" class="status" role="status"></p>
+
+        <section id="results" hidden>
+            <h2>Pokémon buscado</h2>
+            <div id="target"></div>
+
+            <h2>Mais parecidos</h2>
+            <p class="hint">Clique em um Pokémon para buscar os parecidos com ele.</p>
+            <div id="neighbors" class="grid"></div>
+        </section>
+    </main>
+
+    <!-- type="module": permite usar import/export e roda depois do HTML carregar -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>

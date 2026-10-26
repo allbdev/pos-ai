@@ -47,8 +47,8 @@ npm start
 cd Modulo-01/deep-learning/exemplo-02-pokemon-similarity
 npm install
 docker compose up -d
-npm run ingest && npm run seed && npm run train
-npm start
+npm run ingest && npm run ingest:moves && npm run seed && npm run train
+npm start                # page on http://localhost:3001
 ```
 
 See each project's own README or notes file for details.

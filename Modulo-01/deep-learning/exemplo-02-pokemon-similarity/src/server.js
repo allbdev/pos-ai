@@ -4,9 +4,11 @@
 // Pré-requisitos: banco no ar (docker compose up -d), vetores salvos (npm run seed)
 // e, para o /predict-type, modelos treinados (npm run train).
 // Rodar: npm start
+// Página: http://localhost:3001 (arquivos em public/)
 // Testar: curl "http://localhost:3001/pokemon/pikachu/similar?k=5"
 
 import express from 'express'
+import { fileURLToPath } from 'node:url'
 import { pool } from './db.js'
 import { loadClassifiers, validateInput } from './classifier.js'
 
@@ -40,6 +42,21 @@ const app = express()
 
 // Lê corpos JSON das requisições (POST) e coloca em req.body
 app.use(express.json())
+
+// Serve a página (public/index.html) e qualquer outro arquivo da pasta public/.
+// GET / devolve o index.html automaticamente.
+// fileURLToPath: o express.static quer um caminho de arquivo, não uma URL file://
+app.use(express.static(fileURLToPath(new URL('../public/', import.meta.url))))
+
+/**
+ * GET /pokemon
+ * Lista de todos os Pokémon (id + nome), em ordem de Pokédex.
+ * Usada pelo autocompletar da busca na página.
+ */
+app.get('/pokemon', async (req, res) => {
+    const { rows } = await pool.query('SELECT id, name FROM pokemon ORDER BY id')
+    res.json(rows)
+})
 
 /**
  * GET /pokemon/:name/similar?k=5&metric=euclidean
