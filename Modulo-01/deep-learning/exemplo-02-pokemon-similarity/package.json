@@ -4,7 +4,8 @@
   "description": "Pokémon similarity search (pgvector) and type classifier (TensorFlow.js)",
   "type": "module",
   "scripts": {
-    "ingest": "node src/ingest.js"
+    "ingest": "node src/ingest.js",
+    "seed": "node src/seed-vectors.js"
   },
   "license": "ISC",
   "dependencies": {
