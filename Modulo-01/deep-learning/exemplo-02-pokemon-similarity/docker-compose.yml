@@ -1,0 +1,24 @@
+# Postgres com a extensão pgvector já instalada.
+# Subir:  docker compose up -d
+# Parar:  docker compose down        (mantém os dados)
+# Zerar:  docker compose down -v     (apaga o volume com os dados)
+services:
+  db:
+    # Imagem oficial do pgvector: Postgres 17 + extensão "vector"
+    image: pgvector/pgvector:pg17
+    container_name: pokemon_pgvector
+    environment:
+      # Credenciais só para desenvolvimento local, não use em produção
+      POSTGRES_USER: pokemon
+      POSTGRES_PASSWORD: pokemon
+      POSTGRES_DB: pokemon
+    ports:
+      # porta_no_seu_mac:porta_no_container
+      # 5440 porque 5432, 5433 e 5435 já estão em uso por outros projetos
+      - "5440:5432"
+    volumes:
+      # Volume nomeado: os dados sobrevivem a um "docker compose down"
+      - pokemon_pgdata:/var/lib/postgresql/data
+
+volumes:
+  pokemon_pgdata:
