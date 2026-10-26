@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment files (API keys, secrets)
+.env
+.env.*
+
+# Large datasets and trained models (download them again instead of committing)
+Modulo-01/machine-learning/archive/
+*.h5
+
+# Course material (uncomment if this repository will be public)
+# *.pdf
+# *.docx
