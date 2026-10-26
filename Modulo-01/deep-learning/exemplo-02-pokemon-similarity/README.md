@@ -33,11 +33,13 @@ We start with **Generation 1 (ids 1–151)**, a small dataset like the one in th
 The same ideas as exemplo-01, with one new concept: **multi-hot encoding**.
 
 ```
-[ ...6 stats, height, weight, ...18 types ]   → 26 numbers
+[ ...6 stats, height, weight, ...N types ]   → 8 + N numbers
 ```
 
+`N` comes from the data, not from a hard-coded list (`makeContext` in `src/context.js`). Gen 1 has **17 types**, since there are no Dark types and PokéAPI returns current types (so Clefairy is Fairy and Magnemite is Steel), which makes each vector **25 numbers**.
+
 - **Stats, height, weight:** min-max normalization to 0–1. Weight goes from 0.1 kg to hundreds of kg, so without normalization it would dominate everything.
-- **Types:** there are 18 types, and a Pokémon can have **two**. One-hot encoding allows only one position "on"; **multi-hot** allows several:
+- **Types:** a Pokémon can have **two**. One-hot encoding allows only one position "on"; **multi-hot** allows several:
   ```
   types = [normal, fire, water, electric, grass, ..., flying, ...]
   pikachu   (electric)        → [0, 0, 0, 1, 0, ..., 0, ...]
@@ -47,8 +49,8 @@ The same ideas as exemplo-01, with one new concept: **multi-hot encoding**.
 
 ## Part 1: similarity search
 
-1. Encode every Pokémon into its 26-number vector.
-2. Store the vectors in a `vector(26)` column in Postgres.
+1. Encode every Pokémon into its 25-number vector.
+2. Store the vectors in a `vector(25)` column in Postgres.
 3. Find the nearest neighbors with SQL:
    ```sql
    SELECT name FROM pokemon
@@ -60,7 +62,7 @@ pgvector has several distance operators. `<->` is Euclidean (straight-line) dist
 
 ## Part 2: type prediction
 
-The network learns: **input = normalized stats + height + weight (8 numbers) → output = primary type (18 classes)**.
+The network learns: **input = normalized stats + height + weight (8 numbers) → output = primary type (15 classes: only 15 of the 17 types appear as a primary type)**.
 
 The types are left out of the input; otherwise the network would just copy them.
 
@@ -68,20 +70,20 @@ The types are left out of the input; otherwise the network would just copy them.
 |---|---|---|
 | Dense | 32 | ReLU |
 | Dense | 16 | ReLU |
-| Output | 18 | Softmax |
+| Output | 15 | Softmax |
 
 What's new compared to exemplo-01:
 
 | | exemplo-01 | exemplo-02 |
 |---|---|---|
-| Problem | Binary (buy / don't buy) | **Multi-class** (1 of 18 types) |
-| Output | 1 neuron, sigmoid | **18 neurons, softmax** (probabilities that add up to 1) |
+| Problem | Binary (buy / don't buy) | **Multi-class** (1 of 15 types) |
+| Output | 1 neuron, sigmoid | **15 neurons, softmax** (probabilities that add up to 1) |
 | Loss | `binaryCrossentropy` | **`categoricalCrossentropy`** |
 | Validation | None | **`validationSplit: 0.2`**, to watch for overfitting |
 | Where it runs | Browser (Web Worker) | **Node** (`@tensorflow/tfjs-node`) |
 | Persistence | Lost on refresh | **Saved with `model.save('file://...')`** |
 
-**Expectations:** 151 examples across 18 classes is very little data, and stats alone don't fully determine type. The model will be wrong often, and that's part of the lesson. Success means **beating a baseline**: always guessing the most common type. The model should also show patterns that make sense, such as high defense pointing to rock or steel.
+**Expectations:** 151 examples across 15 classes is very little data, and stats alone don't fully determine type. The model will be wrong often, and that's part of the lesson. Success means **beating a baseline**: always guessing the most common type, which is water at 18.5% (28 of 151). The model should also show patterns that make sense, such as high defense pointing to rock or steel.
 
 ## Architecture
 
@@ -147,5 +149,5 @@ Ideas to try once both parts work:
 - **Change the `WEIGHTS`** and compare the similarity results. What makes two Pokémon "similar"?
 - **Euclidean vs. cosine distance:** do the neighbors change?
 - **More data:** train with all generations (~1000 Pokémon). Does accuracy improve?
-- **Predict both types:** use a multi-label output (18 sigmoid neurons and `binaryCrossentropy`) instead of softmax.
+- **Predict both types:** use a multi-label output (17 sigmoid neurons, one per type, and `binaryCrossentropy`) instead of softmax.
 - **Team builder:** suggest Pokémon whose types cover a team's weaknesses.
