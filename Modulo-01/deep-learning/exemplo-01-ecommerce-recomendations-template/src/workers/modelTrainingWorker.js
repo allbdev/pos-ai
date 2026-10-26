@@ -2,7 +2,14 @@ import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js';
 import { workerEvents } from '../events/constants.js';
 
 console.log('Model training worker initialized');
-let _globalCtx = {};
+const _globalCtx = {};
+
+const WEIGHTS = {
+    category: .4,
+    color: .3,
+    price: .2,
+    age: .1
+}
 
 const normalize = (value, min, max) => (value - min) / ((max - min) || 1)
 
@@ -23,13 +30,13 @@ function makeContext(catalog, users) {
     const colors = [...new Set(catalog.map(p => p.color))]
     const categories = [...new Set(catalog.map(p => p.category))]
 
-    const colorsIndex = Object.entries(
+    const colorsIndex = Object.fromEntries(
         colors.map((color, index) => {
             return [color, index]
         })
     )
 
-    const categoriesIndex = Object.entries(
+    const categoriesIndex = Object.fromEntries(
         categories.map((category, index) => {
             return [category, index]
         })
@@ -72,6 +79,36 @@ function makeContext(catalog, users) {
     }
 }
 
+const oneHotWeighted = (index, length, weigth) => tf.oneHot(index, length).cast('float32').mul(weigth)
+
+function encodeProduct(product, context) {
+    // Normalizando dados para ficar de 0 a 1 e
+    // aplicar o peso na recomendação
+    const price = tf.tensor1d([
+        normalize(product.price, context.minPrice, context.maxPrice) * WEIGHTS.price
+    ])
+
+    const age = tf.tensor1d([
+        (context.productAvgAgeNorm[product.name] ?? 0.5) * WEIGHTS.age
+    ])
+
+    const category = oneHotWeighted(
+        context.categoriesIndex[product.category],
+        context.numCategories,
+        WEIGHTS.category
+    )
+
+    const color = oneHotWeighted(
+        context.colorsIndex[product.color],
+        context.numColors,
+        WEIGHTS.color
+    )
+
+    return tf.concat1d(
+        [price, age, category, color]
+    )
+}
+
 async function trainModel({ users }) {
     console.log('Training model with users:', users)
 
@@ -80,6 +117,17 @@ async function trainModel({ users }) {
     const catalog = await (await fetch('/data/products.json')).json()
 
     const context = makeContext(catalog, users)
+
+    context.productsVectors = catalog.map(product => ({
+        name: product.name,
+        meta: {
+            ...product
+        },
+        vector: encodeProduct(product, context).dataSync()
+    }))
+
+    debugger
+
     postMessage({
         type: workerEvents.trainingLog,
         epoch: 1,
