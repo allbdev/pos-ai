@@ -7,7 +7,8 @@
     "ingest": "node src/ingest.js",
     "seed": "node src/seed-vectors.js",
     "start": "node --watch src/server.js",
-    "train": "node src/train.js"
+    "train": "node src/train.js",
+    "knn": "node src/evaluate-knn.js"
   },
   "license": "ISC",
   "dependencies": {

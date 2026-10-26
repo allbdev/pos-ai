@@ -26,6 +26,7 @@ export const toSql = vector => JSON.stringify(vector)
  *
  * @param {number} dimensions tamanho do vetor (context.dimensions: 25 na Gen 1, 26 com todas).
  *   Vem do contexto em vez de ser fixo: se os dados mudarem, o tamanho muda junto.
+ * @param {number} statsDimensions tamanho do vetor só de stats (context.statsDimensions: 8).
  *
  * Por que apagar em vez de "CREATE TABLE IF NOT EXISTS"?
  * O IF NOT EXISTS não altera uma tabela que já existe. Quando passamos da Gen 1
@@ -33,7 +34,7 @@ export const toSql = vector => JSON.stringify(vector)
  * a tabela antiga (vector(25)) recusaria os vetores novos.
  * Como o seed recria todos os dados a partir do JSON, recriar a tabela é seguro.
  */
-export async function recreateTable(dimensions) {
+export async function recreateTable(dimensions, statsDimensions) {
     // Ativa o pgvector neste banco (a imagem Docker tem a extensão,
     // mas cada banco precisa ativar).
     await pool.query('CREATE EXTENSION IF NOT EXISTS vector')
@@ -43,13 +44,20 @@ export async function recreateTable(dimensions) {
     // embedding vector(N): coluna que guarda um vetor de N números.
     // É nela que o pgvector faz a busca por distância (<-> e <=>).
     // types text[]: array de texto do Postgres, ex.: {fire,flying}
+    //
+    // Duas colunas de vetor, para dois usos diferentes:
+    //  - embedding: vetor completo COM tipos e pesos (busca por similaridade, parte 1)
+    //  - stats_embedding: só stats + tamanho, SEM tipos (classificador kNN).
+    //    Se o kNN usasse o embedding completo, os vizinhos teriam o mesmo tipo
+    //    POR CAUSA do tipo: seria "colar" a resposta. É a mesma entrada da rede neural.
     await pool.query(`
         CREATE TABLE pokemon (
-            id        integer PRIMARY KEY,
-            name      text NOT NULL UNIQUE,
-            types     text[] NOT NULL,
-            sprite    text,
-            embedding vector(${dimensions}) NOT NULL
+            id              integer PRIMARY KEY,
+            name            text NOT NULL UNIQUE,
+            types           text[] NOT NULL,
+            sprite          text,
+            embedding       vector(${dimensions}) NOT NULL,
+            stats_embedding vector(${statsDimensions}) NOT NULL
         )
     `)
 }

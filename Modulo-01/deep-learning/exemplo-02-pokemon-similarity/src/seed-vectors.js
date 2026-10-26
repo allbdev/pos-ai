@@ -8,7 +8,7 @@
 
 import { readFile } from 'node:fs/promises'
 import { makeContext } from './context.js'
-import { encodePokemon } from './encode.js'
+import { encodePokemon, encodeStats } from './encode.js'
 import { pool, recreateTable, toSql } from './db.js'
 
 const DATA_FILE = new URL('../data/pokemon.json', import.meta.url)
@@ -21,7 +21,7 @@ async function main() {
     const context = makeContext(pokemons)
 
     // Tabela nova e vazia a cada seed, já com o tamanho de vetor certo
-    await recreateTable(context.dimensions)
+    await recreateTable(context.dimensions, context.statsDimensions)
 
     // Pega UMA conexão do pool para usar em uma transação.
     // Transação = tudo ou nada: se um insert falhar no meio,
@@ -34,15 +34,18 @@ async function main() {
         for (const pokemon of pokemons) {
             const embedding = encodePokemon(pokemon, context)
 
+            // Só stats + tamanho, sem tipos e sem pesos: a mesma entrada da rede neural
+            const statsEmbedding = encodeStats(pokemon, context)
+
             // $1, $2... são parâmetros: o pg escapa os valores para nós.
             // Nunca monte SQL concatenando strings com dados (SQL injection).
             //
             // INSERT simples: a tabela acabou de ser recriada vazia,
             // então não existe Pokémon repetido para atualizar.
             await client.query(
-                `INSERT INTO pokemon (id, name, types, sprite, embedding)
-                 VALUES ($1, $2, $3, $4, $5)`,
-                [pokemon.id, pokemon.name, pokemon.types, pokemon.sprite, toSql(embedding)]
+                `INSERT INTO pokemon (id, name, types, sprite, embedding, stats_embedding)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [pokemon.id, pokemon.name, pokemon.types, pokemon.sprite, toSql(embedding), toSql(statsEmbedding)]
             )
         }
 

@@ -80,7 +80,9 @@ export function makeContext(pokemons) {
         types,
         typesIndex,
         numTypes: types.length,
-        // Tamanho do vetor de um Pokémon:
+        // Tamanho do vetor só de stats (encodeStats): 6 stats + altura + peso
+        statsDimensions: STAT_NAMES.length + 2,
+        // Tamanho do vetor completo de um Pokémon (encodePokemon):
         // 6 stats + altura + peso + 1 posição por tipo
         dimensions: STAT_NAMES.length + 2 + types.length
     }

@@ -97,6 +97,7 @@ docker compose up -d     # Postgres + pgvector on port 5440
 npm run ingest           # Only once: fetches all Pokémon → data/pokemon.json (~40 s)
 npm run seed             # Encodes every Pokémon and stores the vectors in pgvector
 npm run train            # Trains the type classifier → model/
+npm run knn              # Optional: evaluates the kNN classifier (no training)
 npm start                # API on http://localhost:3001
 ```
 
@@ -149,6 +150,7 @@ exemplo-02-pokemon-similarity/
     ├── seed-vectors.js     # Encodes all Pokémon and inserts them into pgvector
     ├── train.js            # Trains the type classifier and saves it to model/
     ├── classifier.js       # Loads the saved model + input validation for /predict-type
+    ├── evaluate-knn.js     # kNN classifier evaluation: type by majority vote of pgvector neighbors
     └── server.js           # HTTP API: similarity + type prediction
 ```
 
@@ -169,11 +171,12 @@ exemplo-02-pokemon-similarity/
 - [x] `train.js`: classifier + baseline comparison
 - [x] `/predict-type` endpoint: **Part 2 done**
 - [x] Experiments: weights, distance metrics, overfitting, more data, log scale, network size
+- [x] kNN classifier with pgvector (parts 1 + 2 together)
 - [ ] Simple HTML page with sprites (optional)
 
 ## Experiments
 
-All accuracy numbers are averages over 10 training runs.
+Network accuracy numbers are averages over 10 training runs.
 
 - **Changing the `WEIGHTS`:** with `{ types: .2, stats: .7, size: .1 }`, Pikachu's neighbors went from all Electric types (Voltorb, Raichu, Electabuzz) to small, fast, frail Pokémon of any type (Voltorb, Poliwag, Meowth).
 - **Euclidean vs. cosine distance** (`?metric=euclidean` or `?metric=cosine`): with the default weights the rankings barely change, because types dominate. With `types: 0`, cosine finds evolution lines (Charmander → Charmeleon, Charizard) while Euclidean finds Pokémon of the same power level.
@@ -204,6 +207,20 @@ All accuracy numbers are averages over 10 training runs.
   - **Classifier:** validation accuracy didn't change (22.6% → 22.5%, 10 runs), and `val_loss` improved slightly (2.75 → 2.63). A neural network can learn non-linear relationships from its inputs, so it partly compensated for the skew already. Size also tells us little about type.
   - **Similarity:** neighbors changed only slightly, because size has just a 0.1 weight. For example, Snorlax's nearest neighbor was Greedent (6 kg) and is now Dudunsparce, with Greedent dropping to 5th.
   - The change stays: it's the correct encoding for skewed data, and it will matter more if `WEIGHTS.size` goes up.
+- **k-nearest neighbors (kNN) classifier: parts 1 and 2 together** (`npm run knn`, `src/evaluate-knn.js`). Predicts a Pokémon's primary type by majority vote among its k nearest neighbors in pgvector, with no training. It searches a separate `stats_embedding` column (stats + size only, the same input as the network); the full `embedding` contains the types, which would give away the answer. Each Pokémon is classified by all the others (leave-one-out), so the result is deterministic: one run, no averaging.
+
+  | k | Euclidean | Cosine |
+  |---|---|---|
+  | 1 | 16.9% | **25.3%** |
+  | 3 | 17.2% | **25.5%** |
+  | 5 | 17.5% | 24.2% |
+  | 10 | 19.7% | 25.0% |
+  | 20 | 21.3% | 25.0% |
+  | 50 | 21.2% | 23.5% |
+
+  **Cosine kNN beat the neural network** (about 25% vs. 22%), with a single SQL query. The reason is evolution lines: cosine compares stat *shape*, evolutions keep the same shape with bigger numbers, and they usually share a type. Bulbasaur's nearest cosine neighbor is Venusaur; its nearest Euclidean neighbor is Clauncher (Water). That's why cosine works best with few neighbors (the family is just 1–2 Pokémon), while Euclidean needs many votes to rise above noise.
+
+  **Caveat:** kNN is partly *recognizing families*, not learning "stats → type" in general. A brand-new Pokémon from a family with no other members in the data would do worse. A stricter test would keep whole evolution families out of the reference data, which needs PokéAPI's `/evolution-chain` data. The network's random split has the same weakness, but a smooth network can't exploit exact profile matches the way 1-NN does.
 - **Bigger network** (`HIDDEN_LAYERS` in `src/train.js`). Averages over 10 runs each:
 
   | Hidden layers | Train acc | Val loss | Val acc |
@@ -217,7 +234,7 @@ All accuracy numbers are averages over 10 training runs.
 
 ### Ideas not tried yet
 
-- **k-nearest neighbors classifier:** predict a type from the most common type among a Pokémon's nearest neighbors by stats, using pgvector. No training, and a second way to check the ~22% ceiling.
+- **Family-aware evaluation:** hold out whole evolution families (from `/evolution-chain`) for both kNN and the network, to measure how much they rely on recognizing relatives.
 - **Predict both types:** use a multi-label output (18 sigmoid neurons, one per type, and `binaryCrossentropy`) instead of softmax.
 - **Team builder:** suggest Pokémon whose types cover a team's weaknesses.
 - **HTML page with sprites**, to explore neighbors visually.
@@ -241,7 +258,9 @@ All accuracy numbers are averages over 10 training runs.
 - **Read train and validation accuracy together.** High train / low validation = overfitting (Gen 1: 72% vs. 37%). Both low = underfitting. Both high and close = the goal.
 - **Regularization isn't free.** Dropout and early stopping closed the gap and improved `val_loss`, but lowered accuracy. `val_loss` punishes confident mistakes; accuracy only checks the top guess.
 - **More data beats tricks.** Going from 151 to 1025 Pokémon removed most of the overfitting by itself, which no regularization setting did.
-- **Find the ceiling.** More data, a better encoding and a bigger network all left validation at about 21–23%. When every lever stops working, the limit is in the data: base stats only say so much about type.
+- **A simple method can beat a neural network.** kNN with cosine distance, with no training, reached about 25% against the network's 22%. Always try a simple baseline method, not just a "dumb" baseline.
+- **Check *why* something works.** The kNN gain came from finding evolution relatives, which is a different skill than the one we set out to measure. Related samples (families) in both the reference and test data can inflate results.
+- **Find the ceiling, and question it.** More data, a better encoding and a bigger network all left the network at about 21–23%, which looked like a limit in the data. kNN then reached 25% with the same inputs, by exploiting evolution families, a pattern the network didn't capture. A ceiling is only a ceiling *for a given method*.
 
 ### Practical gotchas
 
