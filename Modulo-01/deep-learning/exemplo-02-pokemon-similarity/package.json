@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "ingest": "node src/ingest.js",
+    "ingest:moves": "node src/ingest-move-types.js",
     "seed": "node src/seed-vectors.js",
     "start": "node --watch src/server.js",
     "train": "node src/train.js",

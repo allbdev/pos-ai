@@ -2,13 +2,13 @@
 // 🌐 Server: API HTTP para buscar Pokémon parecidos
 // ====================================================================
 // Pré-requisitos: banco no ar (docker compose up -d), vetores salvos (npm run seed)
-// e, para o /predict-type, modelo treinado (npm run train).
+// e, para o /predict-type, modelos treinados (npm run train).
 // Rodar: npm start
 // Testar: curl "http://localhost:3001/pokemon/pikachu/similar?k=5"
 
 import express from 'express'
 import { pool } from './db.js'
-import { loadClassifier, validateInput } from './classifier.js'
+import { loadClassifiers, validateInput } from './classifier.js'
 
 // 3001 para não conflitar com o exemplo-01, que usa a 3000
 const PORT = process.env.PORT ?? 3001
@@ -30,16 +30,11 @@ const METRICS = {
 }
 const DEFAULT_METRIC = 'euclidean'
 
-// Carrega o classificador antes de subir o servidor (top-level await).
-// Se ainda não existir modelo treinado, a API sobe mesmo assim:
-// a busca por similaridade funciona e só o /predict-type fica indisponível.
-let predictType = null
-try {
-    predictType = await loadClassifier()
-    console.log('🔮 Modelo de tipos carregado')
-} catch (error) {
-    console.warn(`⚠️  Modelo não encontrado (rode "npm run train"): ${error.message}`)
-}
+// Carrega os classificadores antes de subir o servidor (top-level await).
+// Se algum modelo ainda não foi treinado, a API sobe mesmo assim:
+// a busca por similaridade funciona e só o /predict-type que precisa dele fica indisponível.
+const classifiers = await loadClassifiers()
+console.log(`🔮 Modelos de tipos carregados: ${Object.keys(classifiers).join(', ') || 'nenhum'}`)
 
 const app = express()
 
@@ -117,21 +112,31 @@ app.get('/pokemon/:name/similar', async (req, res) => {
 
 /**
  * POST /predict-type
- * Corpo: { "stats": { "hp": 35, "attack": 55, ... }, "height": 4, "weight": 60 }
+ * Corpo: { "stats": { "hp": 35, "attack": 55, ... }, "height": 4, "weight": 60, "moves": [...] }
  * Retorna os 3 tipos primários mais prováveis segundo a rede neural.
+ *
+ * "moves" é opcional e deve ser o LEARNSET completo (todos os golpes que o Pokémon
+ * pode aprender), não os 4 golpes de batalha: o modelo foi treinado com learnsets.
+ *  - sem moves: modelo "stats"       (~22% de acerto)
+ *  - com moves: modelo "stats-moves" (~79% de acerto)
  */
 app.post('/predict-type', (req, res) => {
+    // ?. porque o corpo pode nem existir (o validateInput responde esse caso)
+    const modelName = req.body?.moves === undefined ? 'stats' : 'stats-moves'
+    const classifier = classifiers[modelName]
+
     // 503 = serviço indisponível: o problema é do servidor (sem modelo), não do cliente
-    if (!predictType) {
-        return res.status(503).json({ error: 'Modelo não treinado. Rode "npm run train".' })
+    if (!classifier) {
+        return res.status(503).json({ error: `Modelo "${modelName}" não treinado. Rode "npm run train".` })
     }
 
-    const error = validateInput(req.body)
+    const error = validateInput(req.body, classifier.moveTypes)
     if (error) {
         return res.status(400).json({ error })
     }
 
-    res.json({ predictions: predictType(req.body) })
+    // "model" na resposta: quem chama sabe qual modelo respondeu (e o quanto confiar)
+    res.json({ model: modelName, predictions: classifier.predict(req.body) })
 })
 
 // Middleware de erro: qualquer erro inesperado (ex.: banco fora do ar)

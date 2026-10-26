@@ -25,6 +25,9 @@ From `GET https://pokeapi.co/api/v2/pokemon/{id}`, we keep:
 | `height` | `4` | In decimetres |
 | `weight` | `60` | In hectograms |
 | `sprites.front_default` | image URL | Only for display |
+| `moves` | `agility`, `thunderbolt`, ... (109 in total) | The **learnset**: every move the Pokémon *can* learn, by any method (level-up, TM, tutor, egg). Not the 4 moves used in a battle |
+
+Each move's type comes from `GET /type/{name}`, which lists all the moves of a type. `ingest-move-types.js` saves the result as a move → type map in `data/move-types.json` (937 moves, about 20 requests). All 797 moves that Pokémon actually learn have a type in the map.
 
 The project started with **Generation 1 (ids 1–151)**, a small dataset like the one in the class, and now uses **all 1025 species**. `ingest.js` reads the species count from `/pokemon-species`, because `/pokemon` also lists alternate forms (Megas, regional forms) with ids from 10001.
 
@@ -33,10 +36,10 @@ The project started with **Generation 1 (ids 1–151)**, a small dataset like th
 The same ideas as exemplo-01, with one new concept: **multi-hot encoding**.
 
 ```
-[ ...6 stats, height, weight, ...N types ]   → 8 + N numbers
+[ ...6 stats, height, weight, ...N types, ...N move-type shares ]   → 8 + 2N numbers
 ```
 
-`N` comes from the data, not from a hard-coded list (`makeContext` in `src/context.js`). All generations have **18 types**, which makes each vector **26 numbers**. Gen 1 alone had only 17 types (25 numbers), since there are no Dark types there, and PokéAPI returns current types (so Clefairy is Fairy and Magnemite is Steel).
+`N` comes from the data, not from a hard-coded list (`makeContext` in `src/context.js`). All generations have **18 types**, which makes each vector **44 numbers**. Before moves were added it was 26; Gen 1 alone had only 17 types (25 numbers), since there are no Dark types there, and PokéAPI returns current types (so Clefairy is Fairy and Magnemite is Steel).
 
 - **Stats, height, weight:** min-max normalization to 0–1. Weight goes from 0.1 kg to 999.9 kg, so without normalization it would dominate everything. Height and weight are also very skewed, so they go through a log scale first (`logScale` in `src/context.js`).
 - **Types:** a Pokémon can have **two**. One-hot encoding allows only one position "on"; **multi-hot** allows several:
@@ -45,12 +48,13 @@ The same ideas as exemplo-01, with one new concept: **multi-hot encoding**.
   pikachu   (electric)        → [0, 0, 0, 1, 0, ..., 0, ...]
   charizard (fire + flying)   → [0, 1, 0, 0, 0, ..., 1, ...]
   ```
-- **Feature weights:** a `WEIGHTS` object (for example, types 0.5, stats 0.4, size 0.1) decides what "similar" means. Weighting types heavily makes similar Pokémon share types; weighting stats heavily makes them share a battle profile. Changing the weights and comparing the results is one of the learning goals.
+- **Moves:** the share of the learnset that belongs to each type (`encodeMoveTypes`), in the same 18 positions as the types. Pikachu: Normal 0.46, Electric 0.19, Fighting 0.10... Shares instead of counts, because learnset sizes vary from 1 to 375 moves.
+- **Feature weights:** `WEIGHTS = { types: .3, moves: 1, stats: .3, size: .1 }` decides what "similar" means. Weighting types heavily makes similar Pokémon share types; weighting stats heavily makes them share a battle profile; weighting moves heavily makes them play alike. Changing the weights and comparing the results is one of the learning goals.
 
 ## Part 1: similarity search
 
-1. Encode every Pokémon into its 26-number vector.
-2. Store the vectors in a `vector(26)` column in Postgres. The seed drops and recreates the table every time, so the column size always matches the data.
+1. Encode every Pokémon into its 44-number vector.
+2. Store the vectors in a `vector(44)` column in Postgres. The seed drops and recreates the table every time, so the column size always matches the data.
 3. Find the nearest neighbors with SQL:
    ```sql
    SELECT name FROM pokemon
@@ -62,7 +66,14 @@ pgvector has several distance operators. `<->` is Euclidean (straight-line) dist
 
 ## Part 2: type prediction
 
-The network learns: **input = normalized stats + height + weight (8 numbers) → output = primary type (18 classes)**.
+Two networks learn: **input → output = primary type (18 classes)**, one per feature set (`FEATURE_SETS` in `src/encode.js`):
+
+| Model | Input |
+|---|---|
+| `stats` | normalized stats + height + weight (8 numbers) |
+| `stats-moves` | the same 8 + the share of moves per type (26 numbers) |
+
+`POST /predict-type` loads both models and picks one per request: **without `moves`** it uses `stats`; **with `moves`** it uses `stats-moves`. The response says which model answered (`"model": "stats-moves"`). `moves` must be the **full learnset**, because that's what the model was trained on; a 4-move battle set would produce very different shares. Unknown move names return a 400 that lists them, so a typo can't silently change the prediction.
 
 The types are left out of the input; otherwise the network would just copy them.
 
@@ -85,7 +96,7 @@ What's new compared to exemplo-01:
 
 **Expectations:** stats alone don't fully determine type, so the model will be wrong often, and that's part of the lesson. Success means **beating a baseline**: always guessing the most common type, which is water at 13.1% (134 of 1025). The model should also show patterns that make sense, such as high defense pointing to rock or steel.
 
-**Result:** about **22% validation accuracy** against a 13% baseline, averaged over 10 runs. See [Experiments](#experiments) for how we got there and why it doesn't go higher.
+**Result:** about **22%** validation accuracy with stats only and **79%** with stats + moves, against a 13% baseline, averaged over 10 runs. See [Experiments](#experiments) for how we got there.
 
 ## Running
 
@@ -95,8 +106,9 @@ Requires Node 22+ and Docker.
 npm install
 docker compose up -d     # Postgres + pgvector on port 5440
 npm run ingest           # Only once: fetches all Pokémon → data/pokemon.json (~40 s)
+npm run ingest:moves     # Only once: fetches each move's type → data/move-types.json
 npm run seed             # Encodes every Pokémon and stores the vectors in pgvector
-npm run train            # Trains the type classifier → model/
+npm run train            # Trains both type classifiers → model/stats/ and model/stats-moves/
 npm run knn              # Optional: evaluates the kNN classifier (no training)
 npm start                # API on http://localhost:3001
 ```
@@ -126,7 +138,7 @@ PokéAPI ──(once)──▶ ingest.js ──▶ data/pokemon.json      (cache
                                         ▼
                                     server.js
                   GET  /pokemon/:name/similar?k=5&metric=cosine → pgvector search
-                  POST /predict-type  { stats... }  → loaded model
+                  POST /predict-type  { stats, moves? } → stats or stats-moves model
 ```
 
 The API is called **once** and the result is cached in `data/pokemon.json`. This respects PokéAPI's fair-use policy and makes every later step fast and repeatable.
@@ -139,16 +151,19 @@ exemplo-02-pokemon-similarity/
 ├── package.json
 ├── docker-compose.yml      # Postgres with the pgvector extension
 ├── data/
-│   └── pokemon.json        # Cached PokéAPI data (generated by ingest)
-├── model/                  # Saved trained model (generated, gitignored)
+│   ├── pokemon.json        # Cached PokéAPI data (generated by ingest)
+│   └── move-types.json     # Move → type map (generated by ingest:moves)
+├── model/                  # Saved trained models, one folder per feature set (generated, gitignored)
 └── src/
     ├── ingest.js           # Fetches all Pokémon species from PokéAPI → data/pokemon.json
-    ├── context.js          # makeContext: min/max, type index, dimensions
-    ├── encode.js           # encodePokemon: normalization + multi-hot + weights
+    ├── ingest-move-types.js # Fetches each move's type → data/move-types.json
+    ├── data.js             # loadData: reads pokemon.json + move-types.json
+    ├── context.js          # makeContext: min/max, type index, move → type map, dimensions
+    ├── encode.js           # encodePokemon: normalization + multi-hot + move-type shares + weights
     ├── db.js               # Postgres connection + table creation
     ├── tf.js               # Imports tfjs-node with a Node 23+ compatibility fix
     ├── seed-vectors.js     # Encodes all Pokémon and inserts them into pgvector
-    ├── train.js            # Trains the type classifier and saves it to model/
+    ├── train.js            # Trains one type classifier per feature set → model/<name>/
     ├── classifier.js       # Loads the saved model + input validation for /predict-type
     ├── evaluate-knn.js     # kNN classifier evaluation: type by majority vote of pgvector neighbors
     └── server.js           # HTTP API: similarity + type prediction
@@ -172,6 +187,7 @@ exemplo-02-pokemon-similarity/
 - [x] `/predict-type` endpoint: **Part 2 done**
 - [x] Experiments: weights, distance metrics, overfitting, more data, log scale, network size
 - [x] kNN classifier with pgvector (parts 1 + 2 together)
+- [x] Moves: learnset ingest, move-type shares in the similarity vector, `stats-moves` model, optional `moves` in `/predict-type`
 - [ ] Simple HTML page with sprites (optional)
 
 ## Experiments
@@ -179,6 +195,15 @@ exemplo-02-pokemon-similarity/
 Network accuracy numbers are averages over 10 training runs.
 
 - **Changing the `WEIGHTS`:** with `{ types: .2, stats: .7, size: .1 }`, Pikachu's neighbors went from all Electric types (Voltorb, Raichu, Electabuzz) to small, fast, frail Pokémon of any type (Voltorb, Poliwag, Meowth).
+- **Adding moves to the similarity vector:** the first try, `moves: .3` (same as types), barely changed the neighbors. Measuring each group's share of the squared distance showed why: between random Pokémon, **types were 88%** and moves only 4%. **A weight is not influence**: influence is weight × how much the feature varies. Types are 0 or 1; move shares vary by a few points, since every learnset is about 45% Normal.
+
+  | Moves weight | Moves' share of distance | Pikachu's neighbors | Lucario's neighbors |
+  |---|---|---|---|
+  | 0.3 | 4% | Elekid, Blitzle, Voltorb, Electrike, Pichu | ...Primeape, Sirfetch'd |
+  | **1 (chosen)** | **30%** | Elekid, **Raichu, Pichu**, Flaaffy, Blitzle | ...Primeape, **Machamp** |
+  | 2 | 63% | **Raichu**, Flaaffy, Pichu, Electabuzz, Elekid | ...Machamp, **Riolu** |
+
+  With a real share, moves bring in **evolution families** (relatives share most of their learnset): Snorlax's nearest neighbor became Munchlax. At 2, moves dominate, and Gyarados (Water/Flying) loses its Flying partners in favor of Water attackers (Feraligatr, Milotic). At 1, types still define the neighborhood and moves refine it.
 - **Euclidean vs. cosine distance** (`?metric=euclidean` or `?metric=cosine`): with the default weights the rankings barely change, because types dominate. With `types: 0`, cosine finds evolution lines (Charmander → Charmeleon, Charizard) while Euclidean finds Pokémon of the same power level.
 - **Fighting overfitting** (`DROPOUT_RATE` and `PATIENCE` in `src/train.js`). Averages over 10 runs each.
 
@@ -232,6 +257,19 @@ Network accuracy numbers are averages over 10 training runs.
 
   Training accuracy rose with size, but validation accuracy stayed flat at about 21%, and `val_loss` got worse (more confident wrong answers). The extra capacity went into memorizing, not into learning. Together with the log experiment, this points to a **ceiling in the data**: base stats, height and weight only explain the primary type up to about 21–23% with this approach, against a 13% baseline. The code keeps the smallest network, since it gets the same result.
 
+- **Adding moves to the classifier** (`FEATURE_SETS` in `src/encode.js`). `train.js` trains one model per feature set, on the **same split** in each run, so differences come from the features alone. Averages over 10 runs:
+
+  | Model | Inputs | Train acc | Val acc |
+  |---|---|---|---|
+  | Baseline (always water) | – | – | 12.6% |
+  | `stats` | 8 | 31.6% | 22.3% |
+  | **`stats-moves`** | 26 | 94.8% | **79.2%** |
+  | `stats-moves` with dropout 0.3 | 26 | 66.7% | 75.7% |
+
+  The move-type shares carry far more type information than stats: accuracy went from 22% to 79%. Remember what this measures, though: "can a learnset predict type?" is a much easier question than "can stats predict type?", because Pokémon learn many moves of their own type. Features this close to the answer are a mild form of **leakage**: legitimate to use, but high accuracy means "the learnset is a strong clue", not "the network got smarter". Abilities (Blaze, Torrent...) would be even closer to the answer.
+
+  The stats-moves model has a 15-point gap between training and validation, but dropout lowered validation accuracy, as it did for stats. **A gap only matters if closing it improves validation accuracy.**
+
 ### Ideas not tried yet
 
 - **Family-aware evaluation:** hold out whole evolution families (from `/evolution-chain`) for both kNN and the network, to measure how much they rely on recognizing relatives.
@@ -256,9 +294,11 @@ Network accuracy numbers are averages over 10 training runs.
 - **Small validation sets lie.** With 31 Pokémon in validation, one run swung between 29% and 42%. Averaging 10 runs is the minimum for comparing two setups.
 - **Shuffle before `validationSplit`.** TensorFlow.js takes the *last* 20% without shuffling, which would have meant validating only on the newest generations.
 - **Read train and validation accuracy together.** High train / low validation = overfitting (Gen 1: 72% vs. 37%). Both low = underfitting. Both high and close = the goal.
+- **Better features beat everything else.** No network size, encoding tweak or regularization moved the stats model past ~22%. Adding the move-type shares took it to 79%. Information in the input matters more than the model.
 - **Regularization isn't free.** Dropout and early stopping closed the gap and improved `val_loss`, but lowered accuracy. `val_loss` punishes confident mistakes; accuracy only checks the top guess.
 - **More data beats tricks.** Going from 151 to 1025 Pokémon removed most of the overfitting by itself, which no regularization setting did.
 - **A simple method can beat a neural network.** kNN with cosine distance, with no training, reached about 25% against the network's 22%. Always try a simple baseline method, not just a "dumb" baseline.
+- **A weight is not influence.** A feature's effect on distance is its weight × how much it varies. Measure each group's share of the distance instead of trusting the weights.
 - **Check *why* something works.** The kNN gain came from finding evolution relatives, which is a different skill than the one we set out to measure. Related samples (families) in both the reference and test data can inflate results.
 - **Find the ceiling, and question it.** More data, a better encoding and a bigger network all left the network at about 21–23%, which looked like a limit in the data. kNN then reached 25% with the same inputs, by exploiting evolution families, a pattern the network didn't capture. A ceiling is only a ceiling *for a given method*.
 
@@ -269,4 +309,4 @@ Network accuracy numbers are averages over 10 training runs.
 - **Load the model once,** at server startup, not on every request.
 - **In a `callbacks` array, wrap plain objects in `new tf.CustomCallback(...)`**, or `fit` crashes. `earlyStopping` can't restore the best weights in TensorFlow.js.
 - **SQL operators can't be query parameters.** Choose them from a fixed whitelist (`METRICS` in `server.js`), never from raw user input.
-- **A pgvector column has a fixed size.** When the data gained a new type (25 → 26 numbers), the table had to be recreated.
+- **A pgvector column has a fixed size.** When the data gained a new type (25 → 26 numbers), and again with moves (26 → 44), the table had to be recreated.

@@ -6,19 +6,17 @@
 // Pode rodar quantas vezes quiser (npm run seed). Rode de novo sempre que
 // mudar o encode.js ou os WEIGHTS: os vetores antigos são substituídos.
 
-import { readFile } from 'node:fs/promises'
+import { loadData } from './data.js'
 import { makeContext } from './context.js'
 import { encodePokemon, encodeStats } from './encode.js'
 import { pool, recreateTable, toSql } from './db.js'
 
-const DATA_FILE = new URL('../data/pokemon.json', import.meta.url)
-
 async function main() {
-    const pokemons = JSON.parse(await readFile(DATA_FILE, 'utf8'))
+    const { pokemons, moveTypes } = await loadData()
 
     // O contexto é calculado com TODOS os Pokémon (min/max, tipos),
     // antes de codificar qualquer um deles.
-    const context = makeContext(pokemons)
+    const context = makeContext(pokemons, moveTypes)
 
     // Tabela nova e vazia a cada seed, já com o tamanho de vetor certo
     await recreateTable(context.dimensions, context.statsDimensions)

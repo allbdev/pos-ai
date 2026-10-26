@@ -69,6 +69,7 @@ async function fetchPokemon(id) {
  * Depois:
  *   stats: { hp: 35, attack: 55, ... }
  *   types: ['electric']
+ *   moves: ['agility', 'attract', ..., 'thunderbolt', ...]
  */
 function simplifyPokemon(raw) {
     // Transforma a lista de stats em um objeto { nomeDoStat: valor }
@@ -82,6 +83,16 @@ function simplifyPokemon(raw) {
         .toSorted((a, b) => a.slot - b.slot)
         .map(item => item.type.name)
 
+    // Learnset: TODOS os golpes que o Pokémon PODE aprender, por qualquer método
+    // (subindo de nível, TM, tutor, ovo...). Pikachu tem 109.
+    // Não confundir com os 4 golpes que um Pokémon usa numa batalha.
+    // A API manda cada golpe com detalhes por jogo; guardamos só o nome.
+    // Ordem alfabética: a ordem não importa para o vetor, e assim o JSON
+    // muda menos entre um ingest e outro (diffs do git mais limpos).
+    const moves = raw.moves
+        .map(item => item.move.name)
+        .sort()
+
     return {
         id: raw.id,
         name: raw.name,
@@ -89,7 +100,8 @@ function simplifyPokemon(raw) {
         types,
         height: raw.height, // em decímetros (4 = 0.4 m)
         weight: raw.weight, // em hectogramas (60 = 6 kg)
-        sprite: raw.sprites.front_default // só para exibir, não entra no vetor
+        sprite: raw.sprites.front_default, // só para exibir, não entra no vetor
+        moves
     }
 }
 

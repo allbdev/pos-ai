@@ -1,20 +1,24 @@
 // ====================================================================
-// 🧠 Train: rede neural que tenta adivinhar o tipo primário pelos stats
+// 🧠 Train: redes neurais que tentam adivinhar o tipo primário
 // ====================================================================
-// Entrada: 6 stats + altura + peso, normalizados (encodeStats) → 8 números
-// Saída:   probabilidade de cada tipo primário (softmax) → 15 números
+// Treina UM modelo por conjunto de features (FEATURE_SETS no encode.js):
+//  - stats:       6 stats + altura + peso → 8 números
+//  - stats-moves: os mesmos 8 + % dos golpes por tipo → 26 números
+// Saída dos dois: probabilidade de cada tipo primário (softmax) → 18 números
 //
 // Rodar: npm run train
-// Gera:  model/model.json + model/weights.bin (a rede treinada)
-//        model/metadata.json (contexto + lista de tipos, necessários para prever)
+// Gera, para cada conjunto, em model/<nome>/:
+//   model.json + weights.bin (a rede treinada)
+//   metadata.json (nome do conjunto + contexto + lista de tipos, necessários para prever)
 
 import tf from './tf.js'
-import { readFile, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
+import { loadData } from './data.js'
 import { makeContext } from './context.js'
-import { encodeStats } from './encode.js'
+import { FEATURE_SETS } from './encode.js'
 
-const DATA_FILE = new URL('../data/pokemon.json', import.meta.url)
-const MODEL_DIR = new URL('../model/', import.meta.url)
+// Pasta raiz dos modelos: cada conjunto de features fica em model/<nome>/
+const MODELS_DIR = new URL('../model/', import.meta.url)
 
 // 20% dos Pokémon ficam de fora do treino para medir se a rede
 // aprendeu de verdade ou só decorou (overfitting).
@@ -116,24 +120,16 @@ function buildModel(numInputs, numClasses) {
     return model
 }
 
-async function main() {
-    const pokemons = JSON.parse(await readFile(DATA_FILE, 'utf8'))
-    const context = makeContext(pokemons)
-
-    // Classes = tipos que aparecem como PRIMÁRIOS (18 com todas as gerações; eram 15 só na Gen 1).
-    // Ordem alfabética, como no context.js: a posição 0 da saída é sempre o mesmo tipo.
-    const classes = [...new Set(pokemons.map(p => p.types[0]))].sort()
-
-    const shuffled = shuffle(pokemons)
-
-    // Mesmo corte que o validationSplit vai fazer, para calcular o baseline
-    // exatamente nos mesmos Pokémon que a rede vai usar na validação.
-    const splitIndex = Math.floor(shuffled.length * (1 - VALIDATION_SPLIT))
-    const trainSet = shuffled.slice(0, splitIndex)
-    const validationSet = shuffled.slice(splitIndex)
-
-    // xs: um vetor de 8 números por Pokémon (sem os tipos: é isso que queremos prever!)
-    const xs = tf.tensor2d(shuffled.map(p => encodeStats(p, context)))
+/**
+ * Treina, avalia e salva o modelo de UM conjunto de features.
+ * Recebe o split (shuffled/validationSet) pronto: todos os conjuntos usam o
+ * MESMO split, então a diferença de acurácia vem das features, não da sorte.
+ *
+ * @returns acurácia na validação (0 a 1)
+ */
+async function trainFeatureSet(name, encode, { context, classes, shuffled, validationSet }) {
+    // xs: um vetor por Pokémon, SEM os tipos (é isso que queremos prever!)
+    const xs = tf.tensor2d(shuffled.map(p => encode(p, context)))
 
     // ys: one-hot do tipo primário. Ex.: water => [0, 0, ..., 1]
     // Aqui é one-hot de verdade (só uma posição), porque a resposta é UM tipo.
@@ -142,7 +138,7 @@ async function main() {
 
     const model = buildModel(xs.shape[1], classes.length)
 
-    console.log(`Treino: ${trainSet.length} Pokémon | Validação: ${validationSet.length} | Classes: ${classes.length}\n`)
+    console.log(`\n=== ${name} (${xs.shape[1]} entradas) ===`)
 
     // Formata uma linha de log: compare acc (treino) com val_acc (validação).
     // Se acc sobe e val_acc não acompanha, a rede está decorando.
@@ -186,29 +182,61 @@ async function main() {
     // Com early stopping, o treino pode parar numa época que não é múltipla de 10
     console.log(formatEpoch('Parou na época', lastEpoch.epoch, lastEpoch.logs))
 
-    // Avaliação final: rede vs. chute do tipo mais comum, na validação
-    const validationXs = tf.tensor2d(validationSet.map(p => encodeStats(p, context)))
+    // Avaliação final na validação (Pokémon que a rede nunca viu no treino)
+    const validationXs = tf.tensor2d(validationSet.map(p => encode(p, context)))
     const predictions = model.predict(validationXs).argMax(1).dataSync()
     const hits = validationSet.filter((p, i) => classes[predictions[i]] === p.types[0]).length
 
-    const baseline = baselineAccuracy(trainSet, validationSet)
-
-    console.log(`\n📊 Validação (${validationSet.length} Pokémon que a rede nunca viu no treino)`)
-    console.log(`   Rede neural:                     ${(hits / validationSet.length * 100).toFixed(1)}%`)
-    console.log(`   Baseline (sempre "${baseline.mostCommonType}"):${' '.repeat(Math.max(1, 13 - baseline.mostCommonType.length))}${(baseline.accuracy * 100).toFixed(1)}%`)
-
-    // Salva a rede (estrutura + pesos)...
-    await model.save(MODEL_DIR.href.replace(/\/$/, ''))
+    // Salva a rede (estrutura + pesos) em model/<nome>/...
+    const modelDir = new URL(`${name}/`, MODELS_DIR)
+    await model.save(modelDir.href.replace(/\/$/, ''))
 
     // ...e o que é preciso para usá-la depois. Sem isso, o servidor não saberia
-    // normalizar uma entrada nova do mesmo jeito (min/max) nem traduzir
-    // "posição 3 da saída" para o nome do tipo.
+    // qual encode usar (featureSet), normalizar uma entrada nova do mesmo jeito
+    // (min/max) nem traduzir "posição 3 da saída" para o nome do tipo.
     await writeFile(
-        new URL('metadata.json', MODEL_DIR),
-        JSON.stringify({ classes, context }, null, 2)
+        new URL('metadata.json', modelDir),
+        JSON.stringify({ featureSet: name, classes, context }, null, 2)
     )
 
-    console.log(`\n💾 Modelo salvo em model/`)
+    return hits / validationSet.length
+}
+
+async function main() {
+    const { pokemons, moveTypes } = await loadData()
+    const context = makeContext(pokemons, moveTypes)
+
+    // Classes = tipos que aparecem como PRIMÁRIOS (18 com todas as gerações; eram 15 só na Gen 1).
+    // Ordem alfabética, como no context.js: a posição 0 da saída é sempre o mesmo tipo.
+    const classes = [...new Set(pokemons.map(p => p.types[0]))].sort()
+
+    // Um shuffle só, compartilhado por todos os modelos
+    const shuffled = shuffle(pokemons)
+
+    // Mesmo corte que o validationSplit vai fazer, para calcular o baseline
+    // exatamente nos mesmos Pokémon que a rede vai usar na validação.
+    const splitIndex = Math.floor(shuffled.length * (1 - VALIDATION_SPLIT))
+    const trainSet = shuffled.slice(0, splitIndex)
+    const validationSet = shuffled.slice(splitIndex)
+
+    console.log(`Treino: ${trainSet.length} Pokémon | Validação: ${validationSet.length} | Classes: ${classes.length}`)
+
+    const accuracies = {}
+    for (const [name, encode] of Object.entries(FEATURE_SETS)) {
+        accuracies[name] = await trainFeatureSet(name, encode, { context, classes, shuffled, validationSet })
+    }
+
+    // Resumo: todos os modelos + baseline, nos mesmos Pokémon de validação
+    const baseline = baselineAccuracy(trainSet, validationSet)
+    const percent = value => `${(value * 100).toFixed(1)}%`
+
+    console.log(`\n📊 Validação (${validationSet.length} Pokémon que as redes nunca viram no treino)`)
+    console.log(`   baseline (sempre "${baseline.mostCommonType}"): ${percent(baseline.accuracy)}`)
+    Object.entries(accuracies).forEach(([name, accuracy]) => {
+        console.log(`   ${name}: ${percent(accuracy)}`)
+    })
+
+    console.log(`\n💾 Modelos salvos em ${Object.keys(FEATURE_SETS).map(name => `model/${name}/`).join(' e ')}`)
 }
 
 main()

@@ -2,10 +2,10 @@
 // 🔢 Encode: transforma um Pokémon em um vetor de números
 // ====================================================================
 // Mesma ideia do encodeProduct da aula (exemplo-01).
-// O vetor final tem esse formato (26 números com todas as gerações):
+// O vetor final tem esse formato (44 números com todas as gerações):
 //
-// [ hp, attack, defense, sp-attack, sp-defense, speed, height, weight, ...18 tipos ]
-//   \____________________ 0 a 1 _____________________/ \___ 8 números ___/
+// [ hp, attack, defense, sp-attack, sp-defense, speed, height, weight, ...18 tipos, ...18 golpes ]
+//   \______________ 8 números, de 0 a 1 ______________________________/  multi-hot  % por tipo
 //
 // Diferente da aula, aqui usamos arrays JS normais em vez de tensores (tf):
 //  - o pgvector recebe arrays comuns, não tensores;
@@ -17,10 +17,24 @@ import { STAT_NAMES, logScale } from './context.js'
 // O que define "Pokémon parecidos"? Os pesos decidem.
 // Com tipos pesando mais, os vizinhos tendem a ter o mesmo tipo.
 // Com stats pesando mais, os vizinhos tendem a ter o mesmo perfil de batalha.
+// Com golpes pesando mais, os vizinhos tendem a "jogar" parecido.
 // Experimento sugerido: mudar esses valores e comparar os resultados.
+//
+// Tipos e golpes se sobrepõem (Pokémon de água aprendem golpes de água),
+// então somar golpes sem tirar peso dos tipos empurraria tudo ainda mais
+// para "mesmo tipo". Por isso os tipos caíram de 0.5 para 0.3.
+//
+// Peso NÃO é influência: influência = peso × quanto a feature VARIA entre Pokémon.
+// Os tipos variam muito (0 ou 1 por posição); as % de golpes variam pouco
+// (todo mundo tem ~45% de golpes normal). Com golpes em 0.3, eles eram só 4%
+// da distância entre dois Pokémon quaisquer, e os tipos eram 88%.
+// Com golpes em 1, eles viram ~30%: os tipos ainda definem a "vizinhança",
+// e os golpes trazem a família de evolução (Pikachu => Raichu, Pichu).
+// Os pesos não precisam somar 1: só a proporção entre eles importa.
 export const WEIGHTS = {
-    types: .5,
-    stats: .4,
+    types: .3,
+    moves: 1, // % dos golpes de cada tipo
+    stats: .3,
     size: .1 // altura e peso
 }
 
@@ -70,6 +84,58 @@ export function encodeTypes(pokemon, context) {
 }
 
 /**
+ * Porcentagem dos golpes do Pokémon que é de cada tipo.
+ * Mesmo formato do encodeTypes (uma posição por tipo, mesma ordem),
+ * mas com frações em vez de 0/1. As posições somam 1.
+ *
+ * Ex. (Pikachu, 109 golpes): normal 0.46, electric 0.19, fighting 0.10, ...
+ *   => [0, 0, 0.19, ..., 0.10, ..., 0.46, ...]
+ *
+ * Por que porcentagem e não contagem? O tamanho do learnset varia muito
+ * (Weedle 4 golpes, Mew 375). Com contagem, Pokémon com muitos golpes
+ * pareceriam "mais de tudo". A porcentagem compara o PERFIL dos golpes.
+ */
+export function encodeMoveTypes(pokemon, context) {
+    const vector = new Array(context.numTypes).fill(0)
+    let counted = 0
+
+    pokemon.moves.forEach(move => {
+        const index = context.typesIndex[context.moveTypes[move]]
+
+        // Golpe sem tipo conhecido, ou de um tipo que nenhum Pokémon tem
+        // (ex.: shadow): não entra na conta
+        if (index === undefined) return
+
+        vector[index]++
+        counted++
+    })
+
+    // Sem nenhum golpe contado, devolve tudo zero (evita dividir por zero)
+    if (counted === 0) return vector
+
+    return vector.map(count => count / counted)
+}
+
+/**
+ * Conjuntos de features do classificador (parte 2): cada um vira um modelo
+ * separado, salvo em model/<nome>/. É o MESMO mapa no treino (train.js) e
+ * na previsão (classifier.js), então a entrada é codificada igual nos dois.
+ *
+ * Sem pesos aqui: na rede neural, ela mesma aprende quanto cada entrada importa.
+ * (Os WEIGHTS servem para a distância do pgvector, que não aprende nada.)
+ */
+export const FEATURE_SETS = {
+    // 8 números: stats + tamanho (o modelo original)
+    'stats': (pokemon, context) => encodeStats(pokemon, context),
+
+    // 8 + 18 = 26 números: stats + tamanho + % dos golpes por tipo
+    'stats-moves': (pokemon, context) => [
+        ...encodeStats(pokemon, context),
+        ...encodeMoveTypes(pokemon, context)
+    ]
+}
+
+/**
  * Vetor completo, COM pesos. É ele que vai para o pgvector (parte 1).
  * Cada grupo de features é multiplicado pelo seu peso, como o
  * oneHotWeighted da aula fazia com categoria e cor.
@@ -86,5 +152,8 @@ export function encodePokemon(pokemon, context) {
     const types = encodeTypes(pokemon, context)
         .map(value => value * WEIGHTS.types)
 
-    return [...stats, ...size, ...types]
+    const moves = encodeMoveTypes(pokemon, context)
+        .map(value => value * WEIGHTS.moves)
+
+    return [...stats, ...size, ...types, ...moves]
 }

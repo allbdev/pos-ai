@@ -43,8 +43,9 @@ const minMax = values => ({
 
 /**
  * @param {Array<{name: string, stats: Object<string, number>, types: string[], height: number, weight: number}>} pokemons
+ * @param {Object<string, string>} moveTypes mapa "golpe -> tipo" (data/move-types.json)
  */
-export function makeContext(pokemons) {
+export function makeContext(pokemons, moveTypes) {
     // Min/max de CADA stat separadamente.
     // Ex.: speed 90 é comparado com a faixa de speed (15–150),
     // não com a faixa de hp. Cada stat tem sua própria escala.
@@ -80,10 +81,14 @@ export function makeContext(pokemons) {
         types,
         typesIndex,
         numTypes: types.length,
+        // Fica no contexto porque o encode precisa dele para converter
+        // golpes em tipos, e o contexto é salvo junto com o modelo
+        // (metadata.json): o servidor vai precisar do mesmo mapa.
+        moveTypes,
         // Tamanho do vetor só de stats (encodeStats): 6 stats + altura + peso
         statsDimensions: STAT_NAMES.length + 2,
         // Tamanho do vetor completo de um Pokémon (encodePokemon):
-        // 6 stats + altura + peso + 1 posição por tipo
-        dimensions: STAT_NAMES.length + 2 + types.length
+        // 6 stats + altura + peso + 1 posição por tipo + 1 posição por tipo de golpe
+        dimensions: STAT_NAMES.length + 2 + types.length * 2
     }
 }
