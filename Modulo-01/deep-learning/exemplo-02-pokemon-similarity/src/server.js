@@ -17,6 +17,19 @@ const PORT = process.env.PORT ?? 3001
 const DEFAULT_K = 5
 const MAX_K = 50
 
+// Métricas de distância aceitas em ?metric= e o operador do pgvector de cada uma.
+//  - euclidean (<->): distância em linha reta. Compara o "tamanho" (nível de poder).
+//  - cosine    (<=>): ângulo entre os vetores. Compara o "formato" (perfil), ignora o tamanho.
+//
+// Por que um mapa (whitelist)? Operadores não podem ser parâmetros ($1) no SQL,
+// então eles entram no texto da query. Se colocássemos ali o que o usuário
+// digitou, ele poderia injetar SQL. Com o mapa, só esses dois textos fixos entram.
+const METRICS = {
+    euclidean: '<->',
+    cosine: '<=>'
+}
+const DEFAULT_METRIC = 'euclidean'
+
 // Carrega o classificador antes de subir o servidor (top-level await).
 // Se ainda não existir modelo treinado, a API sobe mesmo assim:
 // a busca por similaridade funciona e só o /predict-type fica indisponível.
@@ -34,8 +47,9 @@ const app = express()
 app.use(express.json())
 
 /**
- * GET /pokemon/:name/similar?k=5
+ * GET /pokemon/:name/similar?k=5&metric=euclidean
  * Retorna os k Pokémon com o vetor mais próximo do Pokémon pedido.
+ * metric: "euclidean" (padrão) ou "cosine"
  */
 app.get('/pokemon/:name/similar', async (req, res) => {
     // Nomes no banco estão em minúsculo (vieram assim da PokéAPI)
@@ -48,6 +62,16 @@ app.get('/pokemon/:name/similar', async (req, res) => {
     if (!Number.isInteger(k) || k < 1 || k > MAX_K) {
         return res.status(400).json({ error: `k deve ser um inteiro entre 1 e ${MAX_K}` })
     }
+
+    const metric = req.query.metric ?? DEFAULT_METRIC
+
+    // Object.hasOwn em vez de METRICS[metric]: evita que valores como
+    // "toString" ou "constructor" (herdados de todo objeto JS) passem como válidos.
+    if (!Object.hasOwn(METRICS, metric)) {
+        return res.status(400).json({ error: `metric deve ser: ${Object.keys(METRICS).join(' ou ')}` })
+    }
+
+    const operator = METRICS[metric]
 
     // 1️⃣ Busca o Pokémon pedido. Se não existir, 404.
     //    Fazer isso separado deixa claro a diferença entre
@@ -63,13 +87,13 @@ app.get('/pokemon/:name/similar', async (req, res) => {
 
     const pokemon = target.rows[0]
 
-    // 2️⃣ Busca os vizinhos mais próximos.
-    //    <-> = distância euclidiana (linha reta entre os dois vetores).
+    // 2️⃣ Busca os vizinhos mais próximos, usando o operador da métrica escolhida.
+    //    ${operator} é seguro aqui: só pode ser um dos valores fixos do METRICS.
     //    O embedding volta do banco como texto '[0.1,...]', e serve
     //    direto como parâmetro na próxima query.
     //    id <> $2 tira o próprio Pokémon do resultado (distância 0).
     const neighbors = await pool.query(
-        `SELECT id, name, types, sprite, embedding <-> $1 AS distance
+        `SELECT id, name, types, sprite, embedding ${operator} $1 AS distance
          FROM pokemon
          WHERE id <> $2
          ORDER BY distance
@@ -80,6 +104,7 @@ app.get('/pokemon/:name/similar', async (req, res) => {
     // O embedding não vai na resposta: é um detalhe interno,
     // quem consome a API só quer saber quais Pokémon são parecidos.
     res.json({
+        metric,
         pokemon: {
             id: pokemon.id,
             name: pokemon.name,

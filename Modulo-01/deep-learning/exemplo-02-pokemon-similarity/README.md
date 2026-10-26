@@ -98,7 +98,7 @@ PokéAPI ──(once)──▶ ingest.js ──▶ data/pokemon.json      (cache
                      └──────────────────┬──────────────────┘
                                         ▼
                                     server.js
-                  GET  /pokemon/:name/similar?k=5   → pgvector search
+                  GET  /pokemon/:name/similar?k=5&metric=cosine → pgvector search
                   POST /predict-type  { stats... }  → loaded model
 ```
 
@@ -147,7 +147,7 @@ exemplo-02-pokemon-similarity/
 Ideas to try once both parts work:
 
 - **Change the `WEIGHTS`** and compare the similarity results. What makes two Pokémon "similar"?
-- **Euclidean vs. cosine distance:** do the neighbors change?
+- **Euclidean vs. cosine distance** (`?metric=euclidean` or `?metric=cosine`): with the default weights the rankings barely change, because types dominate. With `types: 0`, cosine finds evolution lines (Charmander → Charmeleon, Charizard) while Euclidean finds Pokémon of the same power level.
 - **More data:** train with all generations (~1000 Pokémon). Does accuracy improve?
 - **Predict both types:** use a multi-label output (17 sigmoid neurons, one per type, and `binaryCrossentropy`) instead of softmax.
 - **Team builder:** suggest Pokémon whose types cover a team's weaknesses.
