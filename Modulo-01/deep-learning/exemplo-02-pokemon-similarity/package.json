@@ -1,0 +1,10 @@
+{
+  "name": "exemplo-02-pokemon-similarity",
+  "version": "1.0.0",
+  "description": "Pokémon similarity search (pgvector) and type classifier (TensorFlow.js)",
+  "type": "module",
+  "scripts": {
+    "ingest": "node src/ingest.js"
+  },
+  "license": "ISC"
+}

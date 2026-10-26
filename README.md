@@ -16,8 +16,10 @@ IA/
     │   ├── exemplo-00/                 # Node + tfjs-node: classify people as premium / medium / basic
     │   └── archive/                    # Kaggle "100 sports" image dataset (train / valid / test)
     └── deep-learning/
-        └── exemplo-01-ecommerce-recomendations-template/
-                                        # Browser app: product recommendations trained in a Web Worker
+        ├── exemplo-01-ecommerce-recomendations-template/
+        │                               # Browser app: product recommendations trained in a Web Worker
+        └── exemplo-02-pokemon-similarity/
+                                        # (planned) Node + pgvector: Pokémon similarity search + type classifier
 ```
 
 ## Modules
