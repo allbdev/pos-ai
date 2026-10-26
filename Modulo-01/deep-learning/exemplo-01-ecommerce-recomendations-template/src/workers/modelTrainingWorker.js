@@ -2,7 +2,7 @@ import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js';
 import { workerEvents } from '../events/constants.js';
 
 console.log('Model training worker initialized');
-const _globalCtx = {};
+let _globalCtx = {};
 
 const WEIGHTS = {
     category: .4,
@@ -14,12 +14,12 @@ const WEIGHTS = {
 const normalize = (value, min, max) => (value - min) / ((max - min) || 1)
 
 /**
- * @param {Array<{id: number, name: string, category: string, price: number, color: string}>} catalog
+ * @param {Array<{id: number, name: string, category: string, price: number, color: string}>} products
  * @param {Array<{id: number, name: string, age: number, purchases: Array<{id: number, name: string, category: string, price: number, color: string}>}>} users
  */
-function makeContext(catalog, users) {
+function makeContext(products, users) {
     const ages = users.map(u => u.age)
-    const prices = catalog.map(p => p.price)
+    const prices = products.map(p => p.price)
 
     const maxAge = Math.max(...ages)
     const minAge = Math.min(...ages)
@@ -27,8 +27,8 @@ function makeContext(catalog, users) {
     const maxPrice = Math.max(...prices)
     const minPrice = Math.min(...prices)
 
-    const colors = [...new Set(catalog.map(p => p.color))]
-    const categories = [...new Set(catalog.map(p => p.category))]
+    const colors = [...new Set(products.map(p => p.color))]
+    const categories = [...new Set(products.map(p => p.category))]
 
     const colorsIndex = Object.fromEntries(
         colors.map((color, index) => {
@@ -55,7 +55,7 @@ function makeContext(catalog, users) {
     })
 
     const productAvgAgeNorm = Object.fromEntries(
-        catalog.map(product => {
+        products.map(product => {
             const avg = ageCounts[product.name] ? ageSums[product.name] / ageCounts[product.name] : midAge
             const norm = normalize(avg, minAge, maxAge)
 
@@ -64,7 +64,7 @@ function makeContext(catalog, users) {
     )
 
     return {
-        catalog,
+        products,
         users,
         colorsIndex,
         categoriesIndex,
@@ -109,16 +109,54 @@ function encodeProduct(product, context) {
     )
 }
 
+function encodeUser(user, context) {
+    if (user.purchases.length) {
+        return tf.stack(
+            user.purchases.map(product => {
+                return encodeProduct(product, context)
+            })
+        )
+            .mean(0)
+            .reshape([
+                1,
+                context.dimensions
+            ])
+    }
+}
+
+function createTrainingData(context) {
+    const inputs = []
+    const labels = []
+    context.users.forEach(user => {
+        const userVector = encodeUser(user, context).dataSync()
+        context.products.forEach(product => {
+            const productVector = encodeProduct(product, context).dataSync()
+
+            const label = user.purchases.some(purchase => purchase.name === product.name ? 1 : 0)
+
+            // combinar user + product
+            inputs.push([...userVector, ...productVector])
+            labels.push(label)
+        })
+    })
+    return {
+        xs: tf.tensor2d(inputs),
+        ys: tf.tensor2d(labels, [labels.length, 1]),
+        inputDimension: context.dimensions * 2
+        // tamanho = userVector + productVector
+    }
+}
+
 async function trainModel({ users }) {
     console.log('Training model with users:', users)
 
     postMessage({ type: workerEvents.progressUpdate, progress: { progress: 50 } });
 
-    const catalog = await (await fetch('/data/products.json')).json()
+    const products = await (await fetch('/data/products.json')).json()
 
-    const context = makeContext(catalog, users)
+    const context = makeContext(products, users)
 
-    context.productsVectors = catalog.map(product => ({
+    context.productsVectors = products.map(product => ({
         name: product.name,
         meta: {
             ...product
@@ -126,6 +164,9 @@ async function trainModel({ users }) {
         vector: encodeProduct(product, context).dataSync()
     }))
 
+    _globalCtx = context
+
+    const trainData = createTrainingData(context)
     debugger
 
     postMessage({
