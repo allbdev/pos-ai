@@ -6,7 +6,7 @@ export default async function main(game) {
 
     game.stage.aim.visible = false;
 
-    worker.onmessage = ({ data }) => {
+    worker.onmessage = async ({ data }) => {
         const { type, x, y } = data;
 
         if (type === 'prediction') {
@@ -23,18 +23,35 @@ export default async function main(game) {
 
         }
 
+        if (type === 'done') {
+            // Limita a frequencia de tiros
+            setTimeout(async () => {
+                // Envia o próximo frame
+                const bitmap = await getframe(game);
+
+                worker.postMessage({
+                    type: 'predict',
+                    image: bitmap,
+                }, [bitmap]);
+            }, 100)
+        }
+
     };
 
-    setInterval(async () => {
-        const canvas = game.app.renderer.extract.canvas(game.stage);
-        const bitmap = await createImageBitmap(canvas);
+    // Envia o frame ao iniciar o projeto
+    const bitmap = await getframe(game);
 
-        worker.postMessage({
-            type: 'predict',
-            image: bitmap,
-        }, [bitmap]);
+    worker.postMessage({
+        type: 'predict',
+        image: bitmap,
+    }, [bitmap]);
 
-    }, 200); // every 200ms
 
     return container;
+}
+
+const getframe = async (game) => {
+    const canvas = game.app.renderer.extract.canvas(game.stage);
+    const bitmap = await createImageBitmap(canvas);
+    return bitmap;
 }

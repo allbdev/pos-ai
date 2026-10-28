@@ -108,8 +108,14 @@ function* processPrediction({ boxes, scores, classes }, width, height) {
 loadModalAndLabels()
 
 self.onmessage = async ({ data }) => {
-    if (data.type !== 'predict') return
-    if (!_model) return
+    if (data.type !== 'predict') {
+        return
+    }
+
+    if (!_model) {
+        postMessage({ type: 'done' })
+        return
+    }
 
     const input = preprocessImage(data.image)
 
@@ -124,6 +130,8 @@ self.onmessage = async ({ data }) => {
             ...prediction
         });
     }
+
+    postMessage({ type: 'done' })
 };
 
 console.log('🧠 YOLOv5n Web Worker initialized');
