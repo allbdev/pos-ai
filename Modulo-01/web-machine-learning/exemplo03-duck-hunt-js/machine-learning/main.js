@@ -36,15 +36,17 @@ export default async function main(game) {
             }, 100)
         }
 
+        if (type === 'model-loaded') {
+            // Envia o primeiro frame somente após carregar o modelo
+            const bitmap = await getframe(game);
+
+            worker.postMessage({
+                type: 'predict',
+                image: bitmap,
+            }, [bitmap]);
+        }
+
     };
-
-    // Envia o frame ao iniciar o projeto
-    const bitmap = await getframe(game);
-
-    worker.postMessage({
-        type: 'predict',
-        image: bitmap,
-    }, [bitmap]);
 
 
     return container;

@@ -108,30 +108,34 @@ function* processPrediction({ boxes, scores, classes }, width, height) {
 loadModalAndLabels()
 
 self.onmessage = async ({ data }) => {
-    if (data.type !== 'predict') {
-        return
-    }
+    try {
+        if (data.type !== 'predict') {
+            return
+        }
 
-    if (!_model) {
+        if (!_model) {
+            postMessage({ type: 'done' })
+            return
+        }
+
+        const input = preprocessImage(data.image)
+
+        const { width, height } = data.image
+        const inferenceResults = await runInference(
+            input
+        )
+
+        for (const prediction of processPrediction(inferenceResults, width, height)) {
+            postMessage({
+                type: 'prediction',
+                ...prediction
+            });
+        }
+    } catch (e) {
+        console.error(e)
+    } finally {
         postMessage({ type: 'done' })
-        return
     }
-
-    const input = preprocessImage(data.image)
-
-    const { width, height } = data.image
-    const inferenceResults = await runInference(
-        input
-    )
-
-    for (const prediction of processPrediction(inferenceResults, width, height)) {
-        postMessage({
-            type: 'prediction',
-            ...prediction
-        });
-    }
-
-    postMessage({ type: 'done' })
 };
 
 console.log('🧠 YOLOv5n Web Worker initialized');
