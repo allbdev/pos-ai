@@ -15,18 +15,20 @@ IA/
     │   ├── teachable-machine.md        # Notes: training an image classifier with Kaggle + Teachable Machine
     │   ├── exemplo-00/                 # Node + tfjs-node: classify people as premium / medium / basic
     │   └── archive/                    # Kaggle "100 sports" image dataset (train / valid / test)
-    └── deep-learning/
-        ├── exemplo-01-ecommerce-recomendations-template/
-        │                               # Browser app: product recommendations trained in a Web Worker
-        └── exemplo-02-pokemon-similarity/
-                                        # Node + pgvector: Pokémon similarity search + type classifier
+    ├── deep-learning/
+    │   ├── exemplo-01-ecommerce-recomendations-template/
+    │   │                               # Browser app: product recommendations trained in a Web Worker
+    │   └── exemplo-02-pokemon-similarity/
+    │                                   # Node + pgvector: Pokémon similarity search + type classifier
+    └── web-machine-learning/
+        └── exemplo03-duck-hunt-js/     # Browser: pretrained YOLO plays Duck Hunt by itself
 ```
 
 ## Modules
 
 | Module | Topic | Status |
 |---|---|---|
-| [Modulo-01](./Modulo-01) | Machine learning and deep learning fundamentals: neural networks, normalization, one-hot encoding, training with TensorFlow.js, vector search with pgvector | In progress |
+| [Modulo-01](./Modulo-01) | Machine learning and deep learning fundamentals: neural networks, normalization, one-hot encoding, training with TensorFlow.js, vector search with pgvector, object detection with a pretrained YOLO model | In progress |
 
 ## Running the examples
 
@@ -49,6 +51,11 @@ npm install
 docker compose up -d
 npm run ingest && npm run ingest:moves && npm run seed && npm run train
 npm start                # page on http://localhost:3001
+
+# Duck Hunt played by YOLO (browser)
+cd Modulo-01/web-machine-learning/exemplo03-duck-hunt-js
+npm install
+npm start                # http://localhost:8080
 ```
 
 See each project's own README or notes file for details.
